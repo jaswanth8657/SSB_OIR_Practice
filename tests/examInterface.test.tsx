@@ -332,4 +332,149 @@ describe('ExamInterface Component Integration (src/components/ExamInterface.tsx)
     expect(screen.getByText(/Source Discrepancy Flagged:/i)).toBeTruthy();
     expect(screen.getByText(/excluded from scoring/i)).toBeTruthy();
   });
+
+  // 12: TASK 1 - Failed manual submission preserves active exam and allows retry
+  it('handles failed manual submission: retains active exam, displays error, and allows retry', () => {
+    const onFinish = vi.fn();
+
+    // Start with storage failing on attempts key
+    let failStorage = true;
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store[key] || null,
+      setItem: (key: string, val: string) => {
+        if (key === 'oir_test_attempts_v1' && failStorage) {
+          throw new Error('QuotaExceededError: storage full');
+        }
+        store[key] = String(val);
+      },
+      removeItem: (key: string) => {
+        delete store[key];
+      },
+      clear: () => {
+        store = {};
+      },
+    });
+
+    act(() => {
+      render(
+        <ExamInterface
+          setNumber={1}
+          questions={mockQuestions.slice(0, 3)}
+          settings={mockSettings}
+          onFinish={onFinish}
+          onExit={vi.fn()}
+        />
+      );
+    });
+
+    // Answer Q1
+    act(() => {
+      fireEvent.click(screen.getByText('Option A'));
+    });
+
+    // Open submit modal & submit
+    act(() => {
+      fireEvent.click(screen.getByText('Submit Test'));
+    });
+    act(() => {
+      fireEvent.click(screen.getByText('Yes, Submit Now'));
+    });
+
+    // CRITICAL: onFinish MUST NOT be called!
+    expect(onFinish).not.toHaveBeenCalled();
+
+    // CRITICAL: Active exam MUST still exist in store!
+    expect(store['oir_active_exam_set_1']).toBeTruthy();
+
+    // Error message must be visible
+    expect(
+      screen.getByText(
+        /Your examination could not be saved because browser storage is unavailable or full/i
+      )
+    ).toBeTruthy();
+
+    // Retry button must be available
+    const retryBtn = screen.getByText('Retry Saving');
+    expect(retryBtn).toBeTruthy();
+
+    // Now storage becomes available again
+    failStorage = false;
+
+    // Click Retry Saving
+    act(() => {
+      fireEvent.click(retryBtn);
+    });
+
+    // onFinish is now successfully called!
+    expect(onFinish).toHaveBeenCalledTimes(1);
+
+    // Active exam state is now cleared from storage
+    expect(store['oir_active_exam_set_1']).toBeUndefined();
+  });
+
+  // 13: TASK 1 - Failed automatic overall timer expiration submission allows retry
+  it('handles failed overall timer submission: retains exam, displays error modal, and retries cleanly', () => {
+    const onFinish = vi.fn();
+
+    let failStorage = true;
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store[key] || null,
+      setItem: (key: string, val: string) => {
+        if (key === 'oir_test_attempts_v1' && failStorage) {
+          throw new Error('QuotaExceededError: storage full');
+        }
+        store[key] = String(val);
+      },
+      removeItem: (key: string) => {
+        delete store[key];
+      },
+      clear: () => {
+        store = {};
+      },
+    });
+
+    act(() => {
+      render(
+        <ExamInterface
+          setNumber={1}
+          questions={mockQuestions.slice(0, 3)}
+          settings={mockSettings}
+          onFinish={onFinish}
+          onExit={vi.fn()}
+        />
+      );
+    });
+
+    // Fast forward entire test duration (25 mins)
+    act(() => {
+      vi.advanceTimersByTime(25 * 60 * 1000);
+    });
+
+    // Storage failed: onFinish MUST NOT be called!
+    expect(onFinish).not.toHaveBeenCalled();
+
+    // Active exam preserved
+    expect(store['oir_active_exam_set_1']).toBeTruthy();
+
+    // Submission error modal is displayed with Retry Saving button
+    expect(
+      screen.getByText(
+        /Your examination could not be saved because browser storage is unavailable or full/i
+      )
+    ).toBeTruthy();
+
+    const retryBtn = screen.getByText('Retry Saving');
+    expect(retryBtn).toBeTruthy();
+
+    // Storage issue resolved
+    failStorage = false;
+
+    act(() => {
+      fireEvent.click(retryBtn);
+    });
+
+    // onFinish called after successful retry
+    expect(onFinish).toHaveBeenCalledTimes(1);
+    expect(store['oir_active_exam_set_1']).toBeUndefined();
+  });
 });

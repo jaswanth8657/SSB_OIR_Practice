@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import 'fake-indexeddb/auto';
 import {
   getUserSettings,
   saveUserSettings,
@@ -12,9 +13,12 @@ import {
   saveActiveExam,
   clearActiveExam,
   checkAndRecoverExpiredExam,
+  normalizeLegacyAttempt,
+  acquireIdbLease,
+  releaseIdbLease,
   DEFAULT_SETTINGS,
 } from '../src/utils/storage';
-import { Question, ActiveExamState } from '../src/types/oir';
+import { Question, ActiveExamState, TestAttempt } from '../src/types/oir';
 
 describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
   // In-memory localStorage mock
@@ -55,7 +59,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
 
   // 2. Attempt history & duplicate protection
   it('saves attempts and prevents duplicate attempt IDs', () => {
-    const att1 = {
+    const att1: TestAttempt = {
       attemptId: 'att_1_1000',
       setNumber: 1,
       timestamp: 1000,
@@ -89,7 +93,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
   it('marks set as completed with best score preserved across retakes', () => {
     expect(getSetProgress(1).status).toBe('not_started');
 
-    const att1 = {
+    const att1: TestAttempt = {
       attemptId: 'att_1_1',
       setNumber: 1,
       timestamp: 1000,
@@ -101,63 +105,108 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       unansweredQuestions: 10,
       excludedQuestions: 0,
       accuracyPercentage: 88,
-      timeTakenSeconds: 1200,
+      timeTakenSeconds: 1100,
+      userAnswers: {},
+    };
+
+    saveAttempt(att1);
+    const progressAfterAttempt1 = getSetProgress(1);
+    expect(progressAfterAttempt1.status).toBe('completed');
+    expect(progressAfterAttempt1.attemptsCount).toBe(1);
+    expect(progressAfterAttempt1.bestScore).toBe(35);
+
+    // Retake attempt 2 with higher score
+    const att2: TestAttempt = {
+      ...att1,
+      attemptId: 'att_1_2',
+      timestamp: 2000,
+      score: 44,
+      correctAnswers: 44,
+    };
+    saveAttempt(att2);
+
+    const progressAfterAttempt2 = getSetProgress(1);
+    expect(progressAfterAttempt2.attemptsCount).toBe(2);
+    expect(progressAfterAttempt2.bestScore).toBe(44);
+
+    // Retake attempt 3 with lower score: bestScore must remain 44
+    const att3: TestAttempt = {
+      ...att1,
+      attemptId: 'att_1_3',
+      timestamp: 3000,
+      score: 40,
+      correctAnswers: 40,
+    };
+    saveAttempt(att3);
+
+    const progressAfterAttempt3 = getSetProgress(1);
+    expect(progressAfterAttempt3.attemptsCount).toBe(3);
+    expect(progressAfterAttempt3.bestScore).toBe(44);
+  });
+
+  // 4. In-progress retake status prioritization
+  it('prioritizes in_progress status during retake while preserving historical completed attempts', () => {
+    const att1: TestAttempt = {
+      attemptId: 'att_1_1',
+      setNumber: 1,
+      timestamp: 1000,
+      totalQuestions: 50,
+      maxScore: 50,
+      score: 42,
+      correctAnswers: 42,
+      incorrectAnswers: 8,
+      unansweredQuestions: 0,
+      excludedQuestions: 0,
+      accuracyPercentage: 84,
+      timeTakenSeconds: 1000,
       userAnswers: {},
     };
     saveAttempt(att1);
 
-    const prog1 = getSetProgress(1);
-    expect(prog1.status).toBe('completed');
-    expect(prog1.bestScore).toBe(35);
-    expect(prog1.attemptsCount).toBe(1);
+    expect(getSetProgress(1).status).toBe('completed');
+    expect(getSetProgress(1).attemptsCount).toBe(1);
+    expect(getSetProgress(1).bestScore).toBe(42);
 
-    // Retake with higher score
-    const att2 = { ...att1, attemptId: 'att_1_2', score: 45, correctAnswers: 45 };
-    saveAttempt(att2);
-
-    const prog2 = getSetProgress(1);
-    expect(prog2.status).toBe('completed');
-    expect(prog2.bestScore).toBe(45);
-    expect(prog2.attemptsCount).toBe(2);
-
-    // TASK 5: Retake in progress: must report 'in_progress' while preserving bestScore & attemptCount!
-    const now = Date.now();
-    saveActiveExam({
+    // Now start a retake: active examination exists in progress
+    const activeRetakeState: ActiveExamState = {
       setNumber: 1,
       currentQuestionIndex: 10,
       userAnswers: {},
-      examStartTime: now,
-      examEndTime: now + 25 * 60 * 1000,
+      examStartTime: Date.now(),
+      examEndTime: Date.now() + 25 * 60 * 1000,
       questionTimeLeft: {},
-      currentQuestionStartedAt: now,
+      currentQuestionStartedAt: Date.now(),
       questionExpiredMap: {},
-    });
+    };
+    saveActiveExam(activeRetakeState);
 
-    const progDuringRetake = getSetProgress(1);
-    expect(progDuringRetake.status).toBe('in_progress');
-    expect(progDuringRetake.attemptsCount).toBe(2);
-    expect(progDuringRetake.bestScore).toBe(45);
+    // During retake, status MUST report 'in_progress' to show Resume button,
+    // but MUST preserve attempt history, attemptsCount, bestScore, and lastAttemptTimestamp
+    const progressDuringRetake = getSetProgress(1);
+    expect(progressDuringRetake.status).toBe('in_progress');
+    expect(progressDuringRetake.attemptsCount).toBe(1);
+    expect(progressDuringRetake.bestScore).toBe(42);
+    expect(progressDuringRetake.lastAttemptTimestamp).toBe(1000);
 
-    // After retake completes / active exam cleared: returns to 'completed'
+    // Clean up active exam
     clearActiveExam(1);
-    const progAfterRetake = getSetProgress(1);
-    expect(progAfterRetake.status).toBe('completed');
-    expect(progAfterRetake.bestScore).toBe(45);
+    expect(getSetProgress(1).status).toBe('completed');
   });
 
-  // 4. Legacy Attempt Normalization (Task 4)
-  describe('Legacy attempt normalization (Task 4)', () => {
-    it('normalizes legacy Set 06 attempt with Q11 excluded and maxScore 49', () => {
-      // Legacy Set 06 attempt without maxScore / excludedQuestions
-      const legacySet06 = {
-        attemptId: 'att_6_legacy',
+  // 5. Evidence-based Legacy Normalization (Task 3)
+  describe('normalizeLegacyAttempt (Task 3: Evidence-Based Normalization)', () => {
+    it('Case A1: Normalizes legacy Set 06 attempt where Q11 was previously marked correct', () => {
+      const legacySet06: TestAttempt = {
+        attemptId: 'att_6_legacy_correct',
         setNumber: 6,
         timestamp: 1600000000000,
         totalQuestions: 50,
+        maxScore: 50,
         score: 40,
         correctAnswers: 40,
         incorrectAnswers: 8,
         unansweredQuestions: 2,
+        excludedQuestions: 0,
         accuracyPercentage: 83,
         timeTakenSeconds: 1100,
         userAnswers: {
@@ -166,20 +215,20 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
         },
       };
 
-      store['oir_test_attempts_v1'] = JSON.stringify([legacySet06]);
+      const normalized = normalizeLegacyAttempt(legacySet06);
 
-      const loaded = getAllAttempts();
-      expect(loaded.length).toBe(1);
-      const normalized = loaded[0];
-
-      // Q11 was excluded: score adjusted from 40 to 39
+      // Q11 was credited: correct answer count and score adjusted from 40 to 39
       expect(normalized.maxScore).toBe(49);
       expect(normalized.excludedQuestions).toBe(1);
       expect(normalized.score).toBe(39);
       expect(normalized.correctAnswers).toBe(39);
+      expect(normalized.incorrectAnswers).toBe(8);
+      expect(normalized.unansweredQuestions).toBe(2);
       expect(normalized.userAnswers[11].isExcluded).toBe(true);
+      expect(normalized.legacyStatus).toBe('verified');
+      expect(normalized.isLegacyUnverified).toBe(false);
 
-      // Invariant: correct + incorrect + unanswered + excluded === totalQuestions
+      // Scoring invariant: correct + incorrect + unanswered + excluded === 50
       expect(
         normalized.correctAnswers +
         normalized.incorrectAnswers +
@@ -187,10 +236,176 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
         normalized.excludedQuestions
       ).toBe(50);
     });
+
+    it('Case A2: Normalizes legacy Set 06 attempt where Q11 was previously marked incorrect', () => {
+      const legacySet06: TestAttempt = {
+        attemptId: 'att_6_legacy_incorrect',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 40,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, selectedOption: 'Z', isAnswered: true, isCorrect: false },
+          1: { questionNumber: 1, selectedOption: 'A', isAnswered: true, isCorrect: true },
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(legacySet06);
+
+      // Q11 was incorrect: score remains 40, incorrect count adjusted from 8 to 7
+      expect(normalized.maxScore).toBe(49);
+      expect(normalized.excludedQuestions).toBe(1);
+      expect(normalized.score).toBe(40);
+      expect(normalized.correctAnswers).toBe(40);
+      expect(normalized.incorrectAnswers).toBe(7);
+      expect(normalized.unansweredQuestions).toBe(2);
+      expect(normalized.userAnswers[11].isExcluded).toBe(true);
+      expect(normalized.legacyStatus).toBe('verified');
+
+      // Scoring invariant: 40 + 7 + 2 + 1 = 50
+      expect(
+        normalized.correctAnswers +
+        normalized.incorrectAnswers +
+        normalized.unansweredQuestions +
+        normalized.excludedQuestions
+      ).toBe(50);
+    });
+
+    it('Case A3: Normalizes legacy Set 06 attempt where Q11 was unanswered', () => {
+      const legacySet06: TestAttempt = {
+        attemptId: 'att_6_legacy_unanswered',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 40,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: false, isCorrect: false },
+          1: { questionNumber: 1, selectedOption: 'A', isAnswered: true, isCorrect: true },
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(legacySet06);
+
+      // Q11 was unanswered: score remains 40, unanswered count adjusted from 2 to 1
+      expect(normalized.maxScore).toBe(49);
+      expect(normalized.excludedQuestions).toBe(1);
+      expect(normalized.score).toBe(40);
+      expect(normalized.correctAnswers).toBe(40);
+      expect(normalized.incorrectAnswers).toBe(8);
+      expect(normalized.unansweredQuestions).toBe(1);
+      expect(normalized.userAnswers[11].isExcluded).toBe(true);
+      expect(normalized.legacyStatus).toBe('verified');
+
+      // Scoring invariant: 40 + 8 + 1 + 1 = 50
+      expect(
+        normalized.correctAnswers +
+        normalized.incorrectAnswers +
+        normalized.unansweredQuestions +
+        normalized.excludedQuestions
+      ).toBe(50);
+    });
+
+    it('Case B: NEVER guesses when Q11 record is missing or incomplete: preserves recorded score and flags review_required', () => {
+      const legacySet06MissingQ11: TestAttempt = {
+        attemptId: 'att_6_legacy_missing_q11',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 40,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          // Q11 is completely missing from userAnswers
+          1: { questionNumber: 1, selectedOption: 'A', isAnswered: true, isCorrect: true },
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(legacySet06MissingQ11);
+
+      // CRITICAL REQUIREMENT: Score MUST NOT be altered based on a guess!
+      expect(normalized.score).toBe(40);
+      expect(normalized.correctAnswers).toBe(40);
+      expect(normalized.incorrectAnswers).toBe(8);
+      expect(normalized.unansweredQuestions).toBe(2);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+      expect(normalized.legacyNote).toContain('Question 11 response could not be verified');
+    });
+
+    it('Case C: Leaves already-normalized attempts completely unchanged on repeated loads', () => {
+      const alreadyNormalized: TestAttempt = {
+        attemptId: 'att_6_already_normalized',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 49,
+        excludedQuestions: 1,
+        score: 39,
+        correctAnswers: 39,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: true, isCorrect: false, isExcluded: true },
+        },
+        legacyStatus: 'verified',
+      };
+
+      const pass1 = normalizeLegacyAttempt(alreadyNormalized);
+      expect(pass1.score).toBe(39);
+      expect(pass1.maxScore).toBe(49);
+
+      const pass2 = normalizeLegacyAttempt(pass1);
+      expect(pass2.score).toBe(39);
+      expect(pass2.maxScore).toBe(49);
+    });
+
+    it('Case D: Leaves non-Set 06 attempts compatible without deduction', () => {
+      const set01Attempt: TestAttempt = {
+        attemptId: 'att_1_normal',
+        setNumber: 1,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        excludedQuestions: 0,
+        score: 45,
+        correctAnswers: 45,
+        incorrectAnswers: 3,
+        unansweredQuestions: 2,
+        accuracyPercentage: 94,
+        timeTakenSeconds: 1000,
+        userAnswers: {},
+      };
+
+      const normalized = normalizeLegacyAttempt(set01Attempt);
+      expect(normalized.score).toBe(45);
+      expect(normalized.maxScore).toBe(50);
+      expect(normalized.excludedQuestions).toBe(0);
+    });
   });
 
-  // 5. Expired Exam Recovery (Task 2 & Task 3)
-  describe('checkAndRecoverExpiredExam (Task 2 & Task 3)', () => {
+  // 6. Cross-Tab Recovery Locking & Concurrency (Task 2 & Task 4)
+  describe('checkAndRecoverExpiredExam (Task 2 & Task 4: Coordination & Failure States)', () => {
     const mockQuestions: Question[] = [];
     for (let i = 1; i <= 50; i++) {
       mockQuestions.push({
@@ -206,7 +421,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       });
     }
 
-    it('recovers expired exam preserving original exam deadline as attempt timestamp (Task 3)', () => {
+    it('recovers expired exam preserving original exam deadline as attempt timestamp', async () => {
       const now = Date.now();
       const originalExpirationTime = now - 15 * 60 * 1000; // expired 15 minutes ago
       const activeState: ActiveExamState = {
@@ -226,15 +441,16 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       saveActiveExam(activeState);
       expect(getActiveExam(1)).not.toBeNull();
 
-      const recovered = checkAndRecoverExpiredExam(1, mockQuestions, DEFAULT_SETTINGS);
-      expect(recovered).not.toBeNull();
-      expect(recovered?.setNumber).toBe(1);
-      // TASK 3 VERIFICATION: Timestamp must be original examEndTime, NOT Date.now()!
-      expect(recovered?.timestamp).toBe(originalExpirationTime);
-      expect(recovered?.score).toBe(1); // Q1 correct, Q2 incorrect
-      expect(recovered?.correctAnswers).toBe(1);
-      expect(recovered?.incorrectAnswers).toBe(1);
-      expect(recovered?.unansweredQuestions).toBe(48);
+      const res = await checkAndRecoverExpiredExam(1, mockQuestions, DEFAULT_SETTINGS);
+      expect(res.status).toBe('recovered');
+      if (res.status === 'recovered') {
+        expect(res.attempt.setNumber).toBe(1);
+        expect(res.attempt.timestamp).toBe(originalExpirationTime);
+        expect(res.attempt.score).toBe(1);
+        expect(res.attempt.correctAnswers).toBe(1);
+        expect(res.attempt.incorrectAnswers).toBe(1);
+        expect(res.attempt.unansweredQuestions).toBe(48);
+      }
 
       // Verify it was safely saved to attempts
       expect(getAllAttempts().length).toBe(1);
@@ -242,12 +458,13 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       // Verify active exam was cleared after successful save
       expect(getActiveExam(1)).toBeNull();
 
-      // Repeated recovery must NOT duplicate attempt in history
-      const repeated = checkAndRecoverExpiredExam(1, mockQuestions, DEFAULT_SETTINGS);
+      // Repeated recovery must return already_recovered and NOT duplicate attempt in history
+      const repeated = await checkAndRecoverExpiredExam(1, mockQuestions, DEFAULT_SETTINGS);
+      expect(repeated.status).toBe('already_recovered');
       expect(getAllAttempts().length).toBe(1);
     });
 
-    it('prevents duplicate attempts when two tabs recover simultaneously (Multi-Tab Protection Task 2)', () => {
+    it('prevents race conditions and duplicates under genuine concurrent recovery requests (Task 2)', async () => {
       const now = Date.now();
       const activeState: ActiveExamState = {
         setNumber: 3,
@@ -264,21 +481,60 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
 
       saveActiveExam(activeState);
 
-      // Tab 1 recovers
-      const recTab1 = checkAndRecoverExpiredExam(3, mockQuestions, DEFAULT_SETTINGS);
-      expect(recTab1).not.toBeNull();
+      // Genuinely simulate two concurrent tabs calling recovery at the same time
+      const [res1, res2] = await Promise.all([
+        checkAndRecoverExpiredExam(3, mockQuestions, DEFAULT_SETTINGS),
+        checkAndRecoverExpiredExam(3, mockQuestions, DEFAULT_SETTINGS),
+      ]);
 
-      // Tab 2 attempts recovery of the exact same exam
-      const recTab2 = checkAndRecoverExpiredExam(3, mockQuestions, DEFAULT_SETTINGS);
-      expect(recTab2).not.toBeNull();
-      expect(recTab2?.attemptId).toBe(recTab1?.attemptId);
+      const validStatuses = ['recovered', 'already_recovered'];
+      expect(validStatuses).toContain(res1.status);
+      expect(validStatuses).toContain(res2.status);
 
-      // Verify exactly ONE attempt exists in history
+      // Exactly ONE attempt must exist in permanent history
       const set3Attempts = getAttemptsForSet(3);
       expect(set3Attempts.length).toBe(1);
+      expect(getActiveExam(3)).toBeNull();
     });
 
-    it('RETAINS active examination if storage write fails (Never silently discard Task 2)', () => {
+    it('recovers independent examination sets simultaneously without cross-blocking', async () => {
+      const now = Date.now();
+      const stateSet5: ActiveExamState = {
+        setNumber: 5,
+        currentQuestionIndex: 5,
+        userAnswers: { 1: { questionNumber: 1, selectedOption: '1', isAnswered: true } },
+        examStartTime: now - 30 * 60 * 1000,
+        examEndTime: now - 2 * 60 * 1000,
+        questionTimeLeft: {},
+        currentQuestionStartedAt: now - 2 * 60 * 1000,
+        questionExpiredMap: {},
+      };
+      const stateSet7: ActiveExamState = {
+        setNumber: 7,
+        currentQuestionIndex: 5,
+        userAnswers: { 1: { questionNumber: 1, selectedOption: '1', isAnswered: true } },
+        examStartTime: now - 30 * 60 * 1000,
+        examEndTime: now - 2 * 60 * 1000,
+        questionTimeLeft: {},
+        currentQuestionStartedAt: now - 2 * 60 * 1000,
+        questionExpiredMap: {},
+      };
+
+      saveActiveExam(stateSet5);
+      saveActiveExam(stateSet7);
+
+      const [resSet5, resSet7] = await Promise.all([
+        checkAndRecoverExpiredExam(5, mockQuestions, DEFAULT_SETTINGS),
+        checkAndRecoverExpiredExam(7, mockQuestions, DEFAULT_SETTINGS),
+      ]);
+
+      expect(resSet5.status).toBe('recovered');
+      expect(resSet7.status).toBe('recovered');
+      expect(getAttemptsForSet(5).length).toBe(1);
+      expect(getAttemptsForSet(7).length).toBe(1);
+    });
+
+    it('RETAINS active examination and returns storage_error if storage write fails (Task 2 & Task 4)', async () => {
       const now = Date.now();
       const activeState: ActiveExamState = {
         setNumber: 4,
@@ -294,7 +550,6 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       saveActiveExam(activeState);
 
       // Simulate localStorage failure when saving attempts
-      const originalSetItem = localStorage.setItem;
       vi.stubGlobal('localStorage', {
         ...localStorage,
         getItem: (k: string) => store[k] || null,
@@ -306,15 +561,19 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
         },
       });
 
-      // Recovery should fail safely
-      const recovered = checkAndRecoverExpiredExam(4, mockQuestions, DEFAULT_SETTINGS);
-      expect(recovered).toBeNull();
+      // Recovery should return structured storage_error
+      const res = await checkAndRecoverExpiredExam(4, mockQuestions, DEFAULT_SETTINGS);
+      expect(res.status).toBe('storage_error');
+      if (res.status === 'storage_error') {
+        expect(res.setNumber).toBe(4);
+        expect(res.message).toContain('QuotaExceededError');
+      }
 
-      // CRITICAL REQUIREMENT: Active exam MUST NOT be deleted if saving failed!
+      // CRITICAL: Active exam MUST NOT be deleted if saving failed!
       expect(getActiveExam(4)).not.toBeNull();
     });
 
-    it('returns null if exam is still in progress (not expired yet)', () => {
+    it('returns not_expired if exam is still in progress', async () => {
       const now = Date.now();
       const activeState: ActiveExamState = {
         setNumber: 2,
@@ -328,9 +587,43 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       };
 
       saveActiveExam(activeState);
-      const recovered = checkAndRecoverExpiredExam(2, mockQuestions, DEFAULT_SETTINGS);
-      expect(recovered).toBeNull();
-      expect(getActiveExam(2)).not.toBeNull(); // Still active
+      const res = await checkAndRecoverExpiredExam(2, mockQuestions, DEFAULT_SETTINGS);
+      expect(res.status).toBe('not_expired');
+      expect(getActiveExam(2)).not.toBeNull();
+    });
+
+    it('IndexedDB fallback lease acquisition, lease verification, and release work cleanly', async () => {
+      const owner1 = 'owner_tab_1';
+      const owner2 = 'owner_tab_2';
+
+      // Tab 1 acquires lease for Set 9
+      const acq1 = await acquireIdbLease(9, owner1, 5000);
+      expect(acq1).toBe(true);
+
+      // Tab 2 cannot acquire actively held lease
+      const acq2 = await acquireIdbLease(9, owner2, 5000);
+      expect(acq2).toBe(false);
+
+      // Tab 1 releases lease
+      await releaseIdbLease(9, owner1);
+
+      // Tab 2 can now acquire lease
+      const acq2Retry = await acquireIdbLease(9, owner2, 5000);
+      expect(acq2Retry).toBe(true);
+      await releaseIdbLease(9, owner2);
+    });
+
+    it('reclaims stale expired IndexedDB lease safely', async () => {
+      const staleOwner = 'owner_stale';
+      const newOwner = 'owner_new';
+
+      // Acquire with expired TTL (0ms)
+      await acquireIdbLease(12, staleOwner, -100);
+
+      // New owner should immediately be able to reclaim expired lease
+      const reclaimed = await acquireIdbLease(12, newOwner, 5000);
+      expect(reclaimed).toBe(true);
+      await releaseIdbLease(12, newOwner);
     });
   });
 });

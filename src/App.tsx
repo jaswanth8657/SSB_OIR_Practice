@@ -67,41 +67,69 @@ export const App: React.FC = () => {
   // Active Exam state if resuming
   const [resumedExamState, setResumedExamState] = useState<ActiveExamState | null>(null);
 
+  // TASK 4: Expired exam recovery errors map (setNumber -> error message)
+  const [recoveryErrors, setRecoveryErrors] = useState<Record<number, string>>({});
+
   // Refresh progress & stats
   const refreshUserData = () => {
     setProgressMap(getAllSetProgress());
     setOverallStats(getOverallStats());
   };
 
-  // Check for any expired exams on mount, recover them, and automatically display Results (Task 3)
+  // Check for any expired exams on mount, recover them, and automatically display Results (Tasks 2, 3, 4)
   useEffect(() => {
-    const recoveredList: TestAttempt[] = [];
-    for (let s = 1; s <= 20; s++) {
-      const active = getActiveExam(s);
-      if (active && active.examEndTime <= Date.now()) {
-        const qList = getQuestionsForSet(s);
-        const recovered = checkAndRecoverExpiredExam(s, qList, settings);
-        if (recovered) {
-          recoveredList.push(recovered);
+    let isCancelled = false;
+
+    async function runStartupRecovery() {
+      const recoveredList: TestAttempt[] = [];
+      const newErrors: Record<number, string> = {};
+
+      for (let s = 1; s <= 20; s++) {
+        const active = getActiveExam(s);
+        if (active && active.examEndTime <= Date.now()) {
+          const qList = getQuestionsForSet(s);
+          try {
+            const res = await checkAndRecoverExpiredExam(s, qList, settings);
+            if (res.status === 'recovered' || res.status === 'already_recovered') {
+              recoveredList.push(res.attempt);
+            } else if (res.status === 'storage_error' || res.status === 'lock_unavailable') {
+              newErrors[s] = res.message;
+            }
+          } catch (err: any) {
+            newErrors[s] = err?.message || `Failed to recover examination for Set ${s}`;
+          }
         }
       }
+
+      if (isCancelled) return;
+
+      if (Object.keys(newErrors).length > 0) {
+        setRecoveryErrors((prev) => ({ ...prev, ...newErrors }));
+      }
+
+      if (recoveredList.length > 0) {
+        refreshUserData();
+        // Sort to present the most recently expired test first while retaining all in history
+        recoveredList.sort((a, b) => b.timestamp - a.timestamp);
+        const latest = recoveredList[0];
+        setActiveSetNumber(latest.setNumber);
+        setActiveQuestions(getQuestionsForSet(latest.setNumber));
+        setActiveAttempt(latest);
+        setCurrentView('results');
+      }
     }
-    if (recoveredList.length > 0) {
-      refreshUserData();
-      // Sort to present the most recently expired test first while retaining all in history
-      recoveredList.sort((a, b) => b.timestamp - a.timestamp);
-      const latest = recoveredList[0];
-      setActiveSetNumber(latest.setNumber);
-      setActiveQuestions(getQuestionsForSet(latest.setNumber));
-      setActiveAttempt(latest);
-      setCurrentView('results');
-    }
+
+    runStartupRecovery();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [settings]);
 
   // ----------------- ACTIONS & VIEW ROUTING -----------------
 
   // Click on a set card from the Dashboard
-  const handleSelectSet = (setNumber: number) => {
+  const handleSelectSet = async (setNumber: number) => {
     setActiveSetNumber(setNumber);
     const questions = getQuestionsForSet(setNumber);
     setActiveQuestions(questions);
@@ -110,16 +138,56 @@ export const App: React.FC = () => {
     const savedExam = getActiveExam(setNumber);
     if (savedExam) {
       // Check if it has expired while user was away
-      const recovered = checkAndRecoverExpiredExam(setNumber, questions, settings);
-      if (recovered) {
-        handleExamFinish(recovered);
-        return;
+      if (savedExam.examEndTime <= Date.now()) {
+        try {
+          const res = await checkAndRecoverExpiredExam(setNumber, questions, settings);
+          if (res.status === 'recovered' || res.status === 'already_recovered') {
+            setRecoveryErrors((prev) => {
+              const updated = { ...prev };
+              delete updated[setNumber];
+              return updated;
+            });
+            handleExamFinish(res.attempt);
+            return;
+          } else if (res.status === 'storage_error' || res.status === 'lock_unavailable') {
+            setRecoveryErrors((prev) => ({ ...prev, [setNumber]: res.message }));
+          }
+        } catch (err: any) {
+          setRecoveryErrors((prev) => ({
+            ...prev,
+            [setNumber]: err?.message || `Failed to recover examination for Set ${setNumber}`,
+          }));
+        }
       }
       setResumedExamState(savedExam);
       setCurrentView('exam');
     } else {
       setResumedExamState(null);
       setCurrentView('start_modal');
+    }
+  };
+
+  // Retry recovery for a specific set (Task 4)
+  const handleRetryRecovery = async (setNumber: number) => {
+    const questions = getQuestionsForSet(setNumber);
+    try {
+      const res = await checkAndRecoverExpiredExam(setNumber, questions, settings);
+      if (res.status === 'recovered' || res.status === 'already_recovered') {
+        setRecoveryErrors((prev) => {
+          const updated = { ...prev };
+          delete updated[setNumber];
+          return updated;
+        });
+        refreshUserData();
+        handleExamFinish(res.attempt);
+      } else if (res.status === 'storage_error' || res.status === 'lock_unavailable') {
+        setRecoveryErrors((prev) => ({ ...prev, [setNumber]: res.message }));
+      }
+    } catch (err: any) {
+      setRecoveryErrors((prev) => ({
+        ...prev,
+        [setNumber]: err?.message || `Failed to recover examination for Set ${setNumber}`,
+      }));
     }
   };
 
@@ -235,8 +303,10 @@ export const App: React.FC = () => {
               progressMap={progressMap}
               stats={overallStats}
               settings={settings}
+              recoveryErrors={recoveryErrors}
               onSelectSet={handleSelectSet}
               onViewSolutionsForSet={(sNum) => handleViewSolutions(sNum)}
+              onRetryRecovery={handleRetryRecovery}
             />
           </div>
         )}

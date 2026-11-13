@@ -5,6 +5,7 @@ import {
   ActiveExamState,
   OverallStats,
   Question,
+  RecoveryResult,
 } from '../types/oir';
 import { buildTestAttempt } from './scoring';
 
@@ -61,25 +62,33 @@ export interface SaveAttemptResult {
 }
 
 /**
- * Task 4: Normalize legacy attempt records to ensure full compatibility
- * with Set 06 Q11 scoring exclusion and the new maxScore/excludedQuestions schema.
+ * Task 3: Evidence-based Legacy Attempt Normalization.
+ * - CASE A: Q11 answer record exists with reliable grading information -> removes Q11 from credited score/counts.
+ * - CASE B: Q11 answer record is missing / incomplete -> NEVER guesses answers or deductions!
+ *   Preserves recorded score, marks attempt as legacy_unverified / review_required, attaches explanatory note.
+ * - CASE C: Already normalized attempt (maxScore: 49, excludedQuestions: 1) -> leaves unchanged.
  */
 export function normalizeLegacyAttempt(att: TestAttempt): TestAttempt {
   if (!att) return att;
 
   // Set 06 normalization
   if (att.setNumber === 6) {
-    const isAlreadyNormalized = att.maxScore === 49 && att.excludedQuestions === 1;
-    if (isAlreadyNormalized) return att;
+    // Case C: Already normalized attempt with verified status
+    if (att.maxScore === 49 && att.excludedQuestions === 1 && att.legacyStatus !== 'review_required') {
+      return att;
+    }
 
-    let newCorrect = att.correctAnswers ?? att.score ?? 0;
-    let newIncorrect = att.incorrectAnswers ?? 0;
-    let newUnanswered = att.unansweredQuestions ?? 0;
-    const newAnswers = att.userAnswers ? { ...att.userAnswers } : {};
+    // Check if Q11 answer record exists with reliable grading information
+    const hasQ11 = Boolean(att.userAnswers && att.userAnswers[11] && typeof att.userAnswers[11] === 'object');
 
-    // Check if Q11 is in userAnswers
-    if (newAnswers[11]) {
+    if (hasQ11) {
+      // Case A: Q11 answer record exists with reliable data
+      let newCorrect = att.correctAnswers ?? att.score ?? 0;
+      let newIncorrect = att.incorrectAnswers ?? 0;
+      let newUnanswered = att.unansweredQuestions ?? 0;
+      const newAnswers = { ...att.userAnswers };
       const q11 = newAnswers[11];
+
       if (q11.isCorrect) {
         newCorrect = Math.max(0, newCorrect - 1);
       } else if (q11.isAnswered) {
@@ -87,37 +96,52 @@ export function normalizeLegacyAttempt(att: TestAttempt): TestAttempt {
       } else {
         newUnanswered = Math.max(0, newUnanswered - 1);
       }
+
       newAnswers[11] = {
         ...q11,
         isCorrect: false,
         isExcluded: true,
       };
+
+      const answeredScored = newCorrect + newIncorrect;
+      const accuracy = answeredScored > 0 ? Math.round((newCorrect / answeredScored) * 100) : 0;
+
+      return {
+        ...att,
+        maxScore: 49,
+        excludedQuestions: 1,
+        totalQuestions: att.totalQuestions || 50,
+        correctAnswers: newCorrect,
+        incorrectAnswers: newIncorrect,
+        unansweredQuestions: newUnanswered,
+        score: newCorrect,
+        accuracyPercentage: accuracy,
+        userAnswers: newAnswers,
+        isLegacyUnverified: false,
+        legacyStatus: 'verified',
+      };
     } else {
-      // If Q11 is not specifically detailed in userAnswers, safely adjust from incorrect/unanswered
-      if (newUnanswered > 0) {
-        newUnanswered--;
-      } else if (newIncorrect > 0) {
-        newIncorrect--;
-      }
+      // Case B: Q11 answer record does NOT exist
+      // DO NOT GUESS whether Q11 was correct, incorrect, or unanswered!
+      return {
+        ...att,
+        score: att.score,
+        correctAnswers: att.correctAnswers ?? att.score ?? 0,
+        incorrectAnswers: att.incorrectAnswers ?? 0,
+        unansweredQuestions: att.unansweredQuestions ?? 0,
+        totalQuestions: att.totalQuestions || 50,
+        maxScore: att.maxScore || 50,
+        excludedQuestions: att.excludedQuestions || 0,
+        originalScore: att.score,
+        isLegacyUnverified: true,
+        legacyStatus: 'review_required',
+        legacyNote:
+          'This is a historical attempt created before Question 11 was excluded from scoring. The original Question 11 response could not be verified, so the historical score has been retained as recorded.',
+      };
     }
-
-    const answeredScored = newCorrect + newIncorrect;
-    const accuracy = answeredScored > 0 ? Math.round((newCorrect / answeredScored) * 100) : 0;
-
-    return {
-      ...att,
-      maxScore: 49,
-      excludedQuestions: 1,
-      correctAnswers: newCorrect,
-      incorrectAnswers: newIncorrect,
-      unansweredQuestions: newUnanswered,
-      score: newCorrect,
-      accuracyPercentage: accuracy,
-      userAnswers: newAnswers,
-    };
   }
 
-  // Non-Set 06 sets
+  // Non-Set 06 sets: ensure schema consistency
   if (att.maxScore === undefined || att.excludedQuestions === undefined) {
     const totalQ = att.totalQuestions || 50;
     return {
@@ -317,38 +341,204 @@ export function clearActiveExam(setNumber: number): void {
 
 // ----------------- CROSS-TAB RECOVERY COORDINATION (TASK 2) -----------------
 
-const LOCK_KEY_PREFIX = 'oir_recovery_lock_';
-const LOCK_TIMEOUT_MS = 5000; // 5-second automatic expiration prevents stale locks
+const WEB_LOCK_PREFIX = 'oir-exam-recovery-set-';
+const LEASE_TIMEOUT_MS = 5000; // 5-second lease prevents stale locks while ensuring safe completion
+const IDB_DB_NAME = 'oir_hub_coordination';
+const IDB_STORE_NAME = 'leases';
+const IDB_VERSION = 1;
 
+/**
+ * Open or initialize coordination IndexedDB database.
+ */
+function openCoordinationDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      return reject(new Error('IndexedDB not supported in current environment'));
+    }
+    try {
+      const req = indexedDB.open(IDB_DB_NAME, IDB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
+          db.createObjectStore(IDB_STORE_NAME, { keyPath: 'key' });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error('Failed to open IndexedDB coordination database'));
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+/**
+ * Atomically inspects and claims a recovery lease in an IndexedDB readwrite transaction.
+ */
+export async function acquireIdbLease(
+  setNumber: number,
+  ownerId: string,
+  ttlMs = LEASE_TIMEOUT_MS
+): Promise<boolean> {
+  try {
+    const db = await openCoordinationDb();
+    return new Promise((resolve) => {
+      const tx = db.transaction(IDB_STORE_NAME, 'readwrite');
+      const store = tx.objectStore(IDB_STORE_NAME);
+      const key = `set_${setNumber}`;
+      const getReq = store.get(key);
+
+      getReq.onsuccess = () => {
+        const existing = getReq.result;
+        const now = Date.now();
+        if (existing && existing.expiresAt > now && existing.ownerId !== ownerId) {
+          // Actively held by another tab/process
+          resolve(false);
+          return;
+        }
+        // Claim or renew lease
+        const putReq = store.put({ key, setNumber, ownerId, expiresAt: now + ttlMs });
+        putReq.onsuccess = () => resolve(true);
+        putReq.onerror = () => resolve(false);
+      };
+      getReq.onerror = () => resolve(false);
+      tx.oncomplete = () => db.close();
+      tx.onerror = () => {
+        db.close();
+        resolve(false);
+      };
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Releases lease only if currently owned by the caller. Never releases another tab's lease.
+ */
+export async function releaseIdbLease(setNumber: number, ownerId: string): Promise<void> {
+  try {
+    const db = await openCoordinationDb();
+    return new Promise((resolve) => {
+      const tx = db.transaction(IDB_STORE_NAME, 'readwrite');
+      const store = tx.objectStore(IDB_STORE_NAME);
+      const key = `set_${setNumber}`;
+      const getReq = store.get(key);
+      getReq.onsuccess = () => {
+        const existing = getReq.result;
+        if (existing && existing.ownerId === ownerId) {
+          store.delete(key);
+        }
+        resolve();
+      };
+      getReq.onerror = () => resolve();
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        resolve();
+      };
+    });
+  } catch {
+    // Ignore
+  }
+}
+
+/**
+ * Executes a recovery critical section inside an exclusive cross-tab lock.
+ * Primary: Web Locks API (`navigator.locks.request`).
+ * Fallback: Transactional IndexedDB Lease with owner token & TTL.
+ * Fail-safe: Fails safely with error if no reliable locking primitive is available.
+ */
+export async function withRecoveryLock<T>(
+  setNumber: number,
+  callback: () => Promise<T>
+): Promise<{ acquired: true; result: T } | { acquired: false; error: string }> {
+  // 1. PRIMARY MECHANISM: Web Locks API
+  if (typeof navigator !== 'undefined' && navigator.locks && typeof navigator.locks.request === 'function') {
+    try {
+      const lockName = `${WEB_LOCK_PREFIX}${setNumber}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), LEASE_TIMEOUT_MS);
+
+      let lockExecuted = false;
+      let execResult: T;
+
+      await navigator.locks.request(
+        lockName,
+        { mode: 'exclusive', signal: controller.signal },
+        async (lock) => {
+          clearTimeout(timeoutId);
+          if (!lock) return;
+          lockExecuted = true;
+          execResult = await callback();
+        }
+      );
+
+      if (lockExecuted) {
+        return { acquired: true, result: execResult! };
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return { acquired: false, error: 'Web Lock request timed out after 5 seconds' };
+      }
+      // If Web Locks throws, fall through to IndexedDB fallback
+    }
+  }
+
+  // 2. FALLBACK MECHANISM: IndexedDB Transaction-based Lease
+  if (typeof indexedDB !== 'undefined') {
+    const ownerId = `owner_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const acquired = await acquireIdbLease(setNumber, ownerId, LEASE_TIMEOUT_MS);
+    if (!acquired) {
+      return {
+        acquired: false,
+        error: `Recovery lease for Set ${setNumber} is currently held by another browser tab`,
+      };
+    }
+    try {
+      const result = await callback();
+      return { acquired: true, result };
+    } finally {
+      await releaseIdbLease(setNumber, ownerId);
+    }
+  }
+
+  // 3. FAIL-SAFE: Do not claim locking succeeded when no reliable primitive is available
+  return {
+    acquired: false,
+    error: 'No reliable lock mechanism (Web Locks or IndexedDB) available in current environment',
+  };
+}
+
+/**
+ * Backwards compatibility helper for synchronous lock checks.
+ */
 export function acquireRecoveryLock(setNumber: number, ownerId: string): boolean {
   try {
-    const key = `${LOCK_KEY_PREFIX}${setNumber}`;
+    const key = `oir_recovery_lock_${setNumber}`;
     const raw = localStorage.getItem(key);
     const now = Date.now();
     if (raw) {
-      try {
-        const lock = JSON.parse(raw);
-        if (lock.expiresAt > now && lock.owner !== ownerId) {
-          // Lock is actively held by another tab/process
-          return false;
-        }
-      } catch {
-        // Corrupted lock payload, safe to overwrite
+      const lock = JSON.parse(raw);
+      if (lock.expiresAt > now && lock.owner !== ownerId) {
+        return false;
       }
     }
     localStorage.setItem(
       key,
-      JSON.stringify({ owner: ownerId, expiresAt: now + LOCK_TIMEOUT_MS })
+      JSON.stringify({ owner: ownerId, expiresAt: now + LEASE_TIMEOUT_MS })
     );
     return true;
   } catch {
-    return true; // Fallback to idempotent history check if localStorage lock throws
+    return false; // NEVER return true on lock failure
   }
 }
 
 export function releaseRecoveryLock(setNumber: number, ownerId: string): void {
   try {
-    const key = `${LOCK_KEY_PREFIX}${setNumber}`;
+    const key = `oir_recovery_lock_${setNumber}`;
     const raw = localStorage.getItem(key);
     if (raw) {
       const lock = JSON.parse(raw);
@@ -362,18 +552,38 @@ export function releaseRecoveryLock(setNumber: number, ownerId: string): void {
 }
 
 /**
- * Task 2 & Task 3: Reliable Expired Exam Recovery with Cross-Tab Coordination.
+ * Notifies other browser tabs via BroadcastChannel when an exam recovery completes.
+ */
+function notifyRecoveryComplete(setNumber: number, attemptId: string): void {
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      const channel = new BroadcastChannel('oir_recovery_channel');
+      channel.postMessage({
+        type: 'recovery_complete',
+        setNumber,
+        attemptId,
+        timestamp: Date.now(),
+      });
+      channel.close();
+    } catch {
+      // Ignore
+    }
+  }
+}
+
+/**
+ * Task 2 & Task 4: Reliable Asynchronous Expired Exam Recovery with Cross-Tab Coordination.
  * - Idempotently checks if the attempt is already in permanent history.
- * - Coordinates via cross-tab locks to prevent duplicate submissions between concurrent tabs.
+ * - Coordinates via exclusive Web Locks API (with transactional IndexedDB fallback).
  * - Preserves original exam deadline (activeExam.examEndTime) as attempt timestamp.
  * - Clears active exam ONLY after successful, verified persistence to permanent storage.
- * - If persistence fails, active exam is retained and null is returned.
+ * - Returns structured RecoveryResult distinguishing success, already recovered, pending, storage_error, lock_unavailable.
  */
-export function checkAndRecoverExpiredExam(
+export async function checkAndRecoverExpiredExam(
   setNumber: number,
   questions: Question[],
   settings: UserSettings
-): TestAttempt | null {
+): Promise<RecoveryResult> {
   const activeExam = getActiveExam(setNumber);
   if (!activeExam) {
     // Cross-tab check: if another tab already recovered this set recently, retrieve it from history
@@ -383,19 +593,19 @@ export function checkAndRecoverExpiredExam(
         const { attemptId, expiresAt } = JSON.parse(recentRaw);
         if (expiresAt > Date.now()) {
           const match = getAllAttempts().find((a) => a.attemptId === attemptId);
-          if (match) return match;
+          if (match) return { status: 'already_recovered', attempt: match };
         }
       }
     } catch {
       // Ignore
     }
-    return null;
+    return { status: 'no_active_exam' };
   }
 
   const now = Date.now();
   // Check if overall timer expired
   if (activeExam.examEndTime > now) {
-    return null; // Not expired yet
+    return { status: 'not_expired' };
   }
 
   // Derive stable deterministic attempt ID from the examination session
@@ -403,7 +613,7 @@ export function checkAndRecoverExpiredExam(
   const examSessionStart = activeExam.examStartTime || (activeExam.examEndTime - totalDurationMs);
   const stableAttemptId = `att_${setNumber}_${examSessionStart}`;
 
-  // Multi-tab coordination: check if already recovered by another tab
+  // Multi-tab coordination: fast check if already recovered and persisted by another tab
   const allAttempts = getAllAttempts();
   const existingAttempt = allAttempts.find((a) => a.attemptId === stableAttemptId);
   if (existingAttempt) {
@@ -416,34 +626,22 @@ export function checkAndRecoverExpiredExam(
     } catch {
       // Ignore
     }
-    return existingAttempt;
+    return { status: 'already_recovered', attempt: existingAttempt };
   }
 
-  // Cross-tab lock to prevent race condition between concurrent tabs
-  const ownerId = `tab_${now}_${Math.random().toString(36).substring(2, 9)}`;
-  const lockAcquired = acquireRecoveryLock(setNumber, ownerId);
-  if (!lockAcquired) {
-    // Another tab is currently recovering this exam; check if history already has it
-    const recheck = getAllAttempts().find((a) => a.attemptId === stableAttemptId);
-    if (recheck) {
-      clearActiveExam(setNumber);
-      return recheck;
-    }
-    return null;
-  }
-
-  try {
+  // Acquire exclusive cross-tab lock covering recovery and persistence
+  const lockResult = await withRecoveryLock(setNumber, async () => {
     // Double-check history under acquired lock
     const historyUnderLock = getAllAttempts().find((a) => a.attemptId === stableAttemptId);
     if (historyUnderLock) {
       clearActiveExam(setNumber);
-      return historyUnderLock;
+      return { status: 'already_recovered' as const, attempt: historyUnderLock };
     }
 
     // Calculate total test time
     const totalTimeSeconds = settings.totalDurationMinutes * 60;
 
-    // TASK 3: Preserve original exam expiration timestamp (activeExam.examEndTime), NOT Date.now()!
+    // Preserve original exam expiration timestamp (activeExam.examEndTime)
     const attempt = buildTestAttempt(
       setNumber,
       questions,
@@ -456,16 +654,22 @@ export function checkAndRecoverExpiredExam(
     // Persist attempt safely
     const saveResult = saveAttempt(attempt);
     if (!saveResult.success) {
-      console.error('Failed to persist recovered exam. Retaining active exam state:', saveResult.error);
-      return null;
+      return {
+        status: 'storage_error' as const,
+        setNumber,
+        message: saveResult.error || 'Failed to persist recovered examination',
+      };
     }
 
     // Verify it exists in permanent attempt history before clearing active exam
     const verifiedAttempts = getAllAttempts();
     const isSaved = verifiedAttempts.some((a) => a.attemptId === stableAttemptId);
     if (!isSaved) {
-      console.error('Attempt was not verified in permanent attempt history. Retaining active exam state.');
-      return null;
+      return {
+        status: 'storage_error' as const,
+        setNumber,
+        message: 'Persistence verification failed: recovered attempt not confirmed in storage',
+      };
     }
 
     // Clear active exam state ONLY after successful, verified persistence
@@ -480,10 +684,28 @@ export function checkAndRecoverExpiredExam(
       // Ignore
     }
 
-    return attempt;
-  } finally {
-    releaseRecoveryLock(setNumber, ownerId);
+    // Notify other tabs
+    notifyRecoveryComplete(setNumber, stableAttemptId);
+
+    return { status: 'recovered' as const, attempt };
+  });
+
+  if (!lockResult.acquired) {
+    // If lock was not acquired, re-check if another tab just completed recovery
+    const recheck = getAllAttempts().find((a) => a.attemptId === stableAttemptId);
+    if (recheck) {
+      clearActiveExam(setNumber);
+      return { status: 'already_recovered', attempt: recheck };
+    }
+
+    return {
+      status: 'lock_unavailable',
+      setNumber,
+      message: lockResult.error || `Could not acquire exclusive recovery lock for Set ${setNumber}`,
+    };
   }
+
+  return lockResult.result;
 }
 
 export function clearAllUserData(): void {
@@ -492,7 +714,7 @@ export function clearAllUserData(): void {
     clearActiveExam(s);
     try {
       localStorage.removeItem(`oir_recent_recovery_${s}`);
-      localStorage.removeItem(`${LOCK_KEY_PREFIX}${s}`);
+      localStorage.removeItem(`oir_recovery_lock_${s}`);
     } catch {
       // Ignore
     }

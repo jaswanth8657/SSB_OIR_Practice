@@ -129,7 +129,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
           </div>
 
           {/* Set 06 Question 11 Exclusion Alert if applicable */}
-          {excludedCount > 0 && (
+          {excludedCount > 0 && !attempt.isLegacyUnverified && (
             <div className="mt-4 p-3.5 rounded-2xl bg-purple-50 border border-purple-200 text-purple-900 text-xs flex items-start gap-3">
               <AlertCircle className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
               <div>
@@ -140,6 +140,28 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
                 <span className="block mt-1 font-mono text-[11px] text-purple-700">
                   Total Questions: {attempt.totalQuestions} = Correct ({attempt.correctAnswers}) + Incorrect ({attempt.incorrectAnswers}) + Unanswered ({attempt.unansweredQuestions}) + Excluded ({excludedCount})
                 </span>
+              </div>
+            </div>
+          )}
+
+          {/* Legacy Unverified Notice (Task 3) */}
+          {(attempt.isLegacyUnverified || attempt.legacyStatus === 'review_required') && (
+            <div className="mt-4 p-4 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-start gap-3 shadow-sm">
+              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <div className="font-bold text-amber-900 text-sm">
+                  Historical Attempt Notice (Unverified Set 06 Record)
+                </div>
+                <p className="leading-relaxed">
+                  This is a historical attempt created before Question 11 was excluded from scoring. The original Question 11 response could not be verified, so the historical score has been retained as recorded.
+                </p>
+                <div className="pt-1 flex flex-wrap gap-3 font-mono text-[11px] text-amber-800">
+                  <span>Original Recorded Score: <strong>{attempt.originalScore ?? attempt.score} / 50</strong></span>
+                  <span>•</span>
+                  <span>Current Verified Max Score: <strong>49</strong></span>
+                  <span>•</span>
+                  <span>Recalculation Status: <strong>Review Required (Historical Data Preserved)</strong></span>
+                </div>
               </div>
             </div>
           )}

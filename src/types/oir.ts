@@ -74,7 +74,20 @@ export interface TestAttempt {
   accuracyPercentage: number;
   timeTakenSeconds: number;
   userAnswers: Record<number, UserAnswer>;
+  isLegacyUnverified?: boolean;
+  legacyStatus?: 'verified' | 'review_required';
+  legacyNote?: string;
+  originalScore?: number;
 }
+
+export type RecoveryResult =
+  | { status: 'recovered'; attempt: TestAttempt }
+  | { status: 'already_recovered'; attempt: TestAttempt }
+  | { status: 'not_expired' }
+  | { status: 'no_active_exam' }
+  | { status: 'recovery_in_progress' }
+  | { status: 'storage_error'; setNumber: number; message: string }
+  | { status: 'lock_unavailable'; setNumber: number; message: string };
 
 export interface UserSettings {
   questionTimeSeconds: number;

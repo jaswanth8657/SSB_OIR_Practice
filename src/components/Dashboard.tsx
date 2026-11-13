@@ -13,6 +13,7 @@ import {
   Filter,
   BarChart3,
   BookOpen,
+  AlertTriangle,
 } from 'lucide-react';
 import { PracticeSetMeta, SetProgress, OverallStats, UserSettings } from '../types/oir';
 
@@ -21,8 +22,10 @@ interface DashboardProps {
   progressMap: Record<number, SetProgress>;
   stats: OverallStats;
   settings: UserSettings;
+  recoveryErrors?: Record<number, string>;
   onSelectSet: (setNumber: number) => void;
   onViewSolutionsForSet: (setNumber: number) => void;
+  onRetryRecovery?: (setNumber: number) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -30,8 +33,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   progressMap,
   stats,
   settings,
+  recoveryErrors,
   onSelectSet,
   onViewSolutionsForSet,
+  onRetryRecovery,
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterTab, setFilterTab] = useState<'all' | 'completed' | 'not_started'>('all');
@@ -51,6 +56,60 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="space-y-10 pb-16 text-slate-900">
+      {/* ----------------- RECOVERY ERROR ALERT BANNER (TASK 4) ----------------- */}
+      {recoveryErrors && Object.keys(recoveryErrors).length > 0 && (
+        <section
+          role="alert"
+          aria-live="polite"
+          className="rounded-3xl border-2 border-amber-300 bg-amber-50 p-6 shadow-sm space-y-4"
+        >
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-700 shrink-0">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div className="flex-1 space-y-1">
+              <h3 className="text-base font-bold text-amber-900">
+                Examination Recovery Pending
+              </h3>
+              <p className="text-xs sm:text-sm text-amber-800 leading-relaxed font-medium">
+                An expired examination is waiting to be recovered. Your saved answers are preserved. Please retry recovery to view your results.
+              </p>
+            </div>
+          </div>
+
+          <div className="divide-y divide-amber-200 border-t border-amber-200 pt-3 space-y-3">
+            {Object.entries(recoveryErrors).map(([sNumStr, errMsg]) => {
+              const sNum = parseInt(sNumStr, 10);
+              return (
+                <div
+                  key={sNum}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 first:pt-0"
+                >
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-bold text-amber-900 font-mono">
+                      SET {sNum.toString().padStart(2, '0')} – Recovery Pending
+                    </div>
+                    <div className="text-[11px] text-amber-700">
+                      {errMsg}
+                    </div>
+                  </div>
+                  {onRetryRecovery && (
+                    <button
+                      type="button"
+                      onClick={() => onRetryRecovery(sNum)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-sm shadow-amber-600/30 transition cursor-pointer self-start sm:self-auto"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Retry Recovery</span>
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* ----------------- HERO HEADER ----------------- */}
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-600 text-white p-8 sm:p-12 shadow-xl shadow-blue-700/15">
         {/* Subtle decorative blurs */}
@@ -332,25 +391,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                 {/* Card Actions */}
                 <div className="pt-3 border-t border-slate-100 space-y-2">
-                  <button
-                    onClick={() => onSelectSet(set.setNumber)}
-                    className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs shadow-sm transition cursor-pointer ${
-                      isCompleted
-                        ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-emerald-500/20'
-                        : isInProgress
-                        ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-amber-500/20'
-                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-blue-500/20'
-                    }`}
-                  >
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>
-                      {isInProgress
-                        ? 'Resume Test'
-                        : isCompleted
-                        ? 'Retake Test'
-                        : 'Start Practice'}
-                    </span>
-                  </button>
+                  {recoveryErrors && recoveryErrors[set.setNumber] && onRetryRecovery ? (
+                    <button
+                      onClick={() => onRetryRecovery(set.setNumber)}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs shadow-sm transition cursor-pointer bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-amber-500/20"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Retry Recovery</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => onSelectSet(set.setNumber)}
+                      className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs shadow-sm transition cursor-pointer ${
+                        isCompleted
+                          ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-emerald-500/20'
+                          : isInProgress
+                          ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-amber-500/20'
+                          : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-blue-500/20'
+                      }`}
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>
+                        {isInProgress
+                          ? 'Resume Test'
+                          : isCompleted
+                          ? 'Retake Test'
+                          : 'Start Practice'}
+                      </span>
+                    </button>
+                  )}
 
                   {isCompleted && (
                     <button

@@ -125,6 +125,10 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
   // Submit confirmation modal
   const [showSubmitModal, setShowSubmitModal] = useState<boolean>(false);
 
+  // TASK 1: Submission persistence error state & saving indicator
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+
   // Current question object
   const currentQuestion = questions[currentIndex] || questions[0];
   const curQNum = currentQuestion.questionNumber;
@@ -136,11 +140,13 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
     isAnswered: false,
   };
 
-  // ----------------- SUBMISSION LOGIC (TASK 4 & TASK 6) -----------------
+  // ----------------- SUBMISSION LOGIC (TASK 1) -----------------
   const submitExam = useCallback(
     (reason: 'manual' | 'overall_timer_expired' = 'manual') => {
       if (isSubmittingRef.current) return;
       isSubmittingRef.current = true;
+      setIsSaving(true);
+      setSubmissionError(null);
 
       const totalTimeLimitSeconds = settings.totalDurationMinutes * 60;
       const timeTaken = Math.min(
@@ -163,10 +169,17 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
       const saveRes = saveAttempt(attempt);
       if (saveRes.success) {
         clearActiveExam(setNumber);
+        setIsSaving(false);
+        onFinish(attempt);
       } else {
+        // Unlock submission ref so the candidate can retry saving
+        isSubmittingRef.current = false;
+        setIsSaving(false);
         console.error('Failed to persist attempt to localStorage:', saveRes.error);
+        setSubmissionError(
+          'Your examination could not be saved because browser storage is unavailable or full. Your answers have been preserved. Please retry saving your results.'
+        );
       }
-      onFinish(attempt);
     },
     [questions, userAnswers, setNumber, settings, overallRemaining, examEndTime, onFinish]
   );
@@ -961,6 +974,57 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
                 className="flex-1 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm shadow-emerald-600/30 transition cursor-pointer"
               >
                 Yes, Submit Now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------- SUBMISSION ERROR MODAL (TASK 1) ----------------- */}
+      {submissionError && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md bg-white border-2 border-rose-300 rounded-2xl p-6 text-slate-800 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-rose-600">
+              <AlertTriangle className="w-6 h-6 shrink-0" />
+              <h3 className="text-lg font-bold text-slate-900">Submission Storage Issue</h3>
+            </div>
+
+            <p className="text-xs text-slate-700 leading-relaxed font-medium">
+              {submissionError}
+            </p>
+
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1.5 font-mono">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Practice Set:</span>
+                <span className="text-slate-800 font-bold">SET {setNumber.toString().padStart(2, '0')}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-emerald-700">Answered Questions:</span>
+                <span className="text-emerald-800 font-bold">{answeredCount} of {totalQuestions}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">State:</span>
+                <span className="text-blue-700 font-bold">Preserved in Active Storage</span>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center gap-3">
+              {overallRemaining > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSubmissionError(null)}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs border border-slate-200 transition cursor-pointer"
+                >
+                  Return to Test
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => submitExam('manual')}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-sm shadow-blue-600/30 transition cursor-pointer disabled:opacity-50"
+              >
+                {isSaving ? 'Retrying...' : 'Retry Saving'}
               </button>
             </div>
           </div>
