@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Production build outputs
+dist/
+build/
+
+# Environment variables & local secrets
+.env
+.env.local
+.env.*.local
+.env.*
+*.env
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Temporary scratch directories & Python cache
+test_dump/
+test_img/
+test_ans_img/
+__pycache__/
+*.py[cod]
+*$py.class
+*.tmp
+*.temp
+
+# Temporary scratch and investigation scripts
+check_*.py
+inspect_*.py
+dump_*.py
+debug_*.py
+test_*.py
+find_*.py
+scan_*.py
+parse_*.py
+create_*.py
+count_*.py
+verify_*.py
+attach_*.py
+extract_all_arithmetic_images.py
+
+# Editor / IDE configuration and system files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db

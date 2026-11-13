@@ -1,0 +1,1642 @@
+[
+  {
+    "id": 1,
+    "setNumber": 20,
+    "questionNumber": 1,
+    "instruction": "",
+    "statement": "Which one of the following cubes can possibly belong to Group A?",
+    "type": "single_choice",
+    "images": [
+      "/images/set20/q1_Image1394.png",
+      "/images/set20/q1_Image1395.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Cube 1"
+      },
+      {
+        "id": "2",
+        "text": "Cube 2"
+      },
+      {
+        "id": "3",
+        "text": "Cube 3"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(2)",
+    "explanation": "Group A then all the geometrical designs on the faces are not shaded while in the Group B all the\ndesigns are shaded (filled with solid black colour) and if you see the options then you will find that only\nin the second figure can see one geometrical figure is not shaded. So, we can say that “2” possibly\nbelongs to Group A, we can’t be sure but only thing here is a possibility we don’t know what all designs\nwill be on the back of all the dice.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 2,
+    "setNumber": 20,
+    "questionNumber": 2,
+    "instruction": "",
+    "statement": "Write the number of the choice that applies best to the statement given below: \nA lady in India can  marry with the brother of deceased husband but no man can marry th e sister of \ndeceased wife",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "True"
+      },
+      {
+        "id": "2",
+        "text": "Probable"
+      },
+      {
+        "id": "3",
+        "text": "False"
+      },
+      {
+        "id": "4",
+        "text": "Absurd"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(2)",
+    "explanation": "A lady in India can marry with the brother of deceased husband but no man can marry the sister of\ndeceased wife. There is no such type of custom, hence it may happen probably.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 3,
+    "setNumber": 20,
+    "questionNumber": 3,
+    "instruction": "",
+    "statement": "Find if the two cubes are alike. Write ‘Yes’ or ‘No’ on the answer sheet:",
+    "type": "boolean",
+    "images": [
+      "/images/set20/q3_Image1396.png"
+    ],
+    "options": [
+      {
+        "id": "Yes",
+        "text": "Yes"
+      },
+      {
+        "id": "No",
+        "text": "No"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "Yes",
+    "explanation": "Yes, both are same.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 4,
+    "setNumber": 20,
+    "questionNumber": 4,
+    "instruction": "",
+    "statement": "Find if the two cubes are alike. Write ‘Yes’ or ‘No’ on the answer sheet:",
+    "type": "boolean",
+    "images": [
+      "/images/set20/q4_Image1397.png"
+    ],
+    "options": [
+      {
+        "id": "Yes",
+        "text": "Yes"
+      },
+      {
+        "id": "No",
+        "text": "No"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "Yes",
+    "explanation": "Yes, both are same",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 5,
+    "setNumber": 20,
+    "questionNumber": 5,
+    "instruction": "",
+    "statement": "Write the number of the figure which will come next in the series:",
+    "type": "single_choice",
+    "images": [
+      "/images/set20/q5_Image1398.png",
+      "/images/set20/q5_Image1399.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Option 1"
+      },
+      {
+        "id": "2",
+        "text": "Option 2"
+      },
+      {
+        "id": "3",
+        "text": "Option 3"
+      },
+      {
+        "id": "4",
+        "text": "Option 4"
+      },
+      {
+        "id": "5",
+        "text": "Option 5"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(4)",
+    "explanation": "In each step, the shaded portion and small dot move 90° clockwise and inside dots take new place\nalternately.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 6,
+    "setNumber": 20,
+    "questionNumber": 6,
+    "instruction": "",
+    "statement": "Which two of the following figures belong to Class A?",
+    "type": "multiple_choice",
+    "images": [
+      "/images/set20/q6_Image1400.png",
+      "/images/set20/q6_Image1403.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Figure 1"
+      },
+      {
+        "id": "2",
+        "text": "Figure 2"
+      },
+      {
+        "id": "3",
+        "text": "Figure 3"
+      },
+      {
+        "id": "4",
+        "text": "Figure 4"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "3 and 4",
+    "explanation": "Class A has shade in the bottom right of the figures\nHence, figures (3) and (4) belong to Class A.",
+    "solutionImages": [],
+    "pdfPage": 257
+  },
+  {
+    "id": 7,
+    "setNumber": 20,
+    "questionNumber": 7,
+    "instruction": "",
+    "statement": "Write the number of the figure which will come next in the series:",
+    "type": "single_choice",
+    "images": [
+      "/images/set20/q7_Image1404.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Option 1"
+      },
+      {
+        "id": "2",
+        "text": "Option 2"
+      },
+      {
+        "id": "3",
+        "text": "Option 3"
+      },
+      {
+        "id": "4",
+        "text": "Option 4"
+      },
+      {
+        "id": "5",
+        "text": "Option 5"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(2)",
+    "explanation": "Two and three small lines are added alternately to form L in a set order. So, the answer figure 2 will\ncontinue the series.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 8,
+    "setNumber": 20,
+    "questionNumber": 8,
+    "instruction": "",
+    "statement": "Write the number of the figure which will come next in the series:",
+    "type": "single_choice",
+    "images": [
+      "/images/set20/q8_Image1405.png",
+      "/images/set20/q8_Image1406.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Option 1"
+      },
+      {
+        "id": "2",
+        "text": "Option 2"
+      },
+      {
+        "id": "3",
+        "text": "Option 3"
+      },
+      {
+        "id": "4",
+        "text": "Option 4"
+      },
+      {
+        "id": "5",
+        "text": "Option 5"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(2)",
+    "explanation": "In the answer figure, the horizontal line would point upwards and the lower portion of the design should\nbe like that of the first figure.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 9,
+    "setNumber": 20,
+    "questionNumber": 9,
+    "instruction": "",
+    "statement": "Write the last letter of the rearranged sentence. \nthe farmer has the corn is which ripened cutting",
+    "type": "text",
+    "images": [],
+    "options": [],
+    "dropdownGroups": [],
+    "correctAnswer": "D",
+    "explanation": "The rearranged sentence is:\nThe farmer is cutting the corn which has ripened.\nThen, the last letter of the rearranged sentence is ‘d’",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 10,
+    "setNumber": 20,
+    "questionNumber": 10,
+    "instruction": "",
+    "statement": "Write the SECOND letter of the rearranged word. \nMake a list of GITAYNHN you need and I'll drive into town Monday",
+    "type": "text",
+    "images": [],
+    "options": [],
+    "dropdownGroups": [],
+    "correctAnswer": "N",
+    "explanation": "The rearranged word is ANYTHING and its SECOND letter is “N”.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 11,
+    "setNumber": 20,
+    "questionNumber": 11,
+    "instruction": "",
+    "statement": "Furnace is to Heat as Refrigerator is to __________.",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Cold"
+      },
+      {
+        "id": "2",
+        "text": "Electricity"
+      },
+      {
+        "id": "3",
+        "text": "Bake"
+      },
+      {
+        "id": "4",
+        "text": "Air"
+      },
+      {
+        "id": "5",
+        "text": "Heat"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(1)",
+    "explanation": "As Furnace produces Heat. Similarly, Refrigerator produces Cold.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 12,
+    "setNumber": 20,
+    "questionNumber": 12,
+    "instruction": "",
+    "statement": "Identify the correct figure to continue the series / complete the pattern.",
+    "type": "single_choice",
+    "images": [
+      "/images/set20/q12_Image1407.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Option 1"
+      },
+      {
+        "id": "2",
+        "text": "Option 2"
+      },
+      {
+        "id": "3",
+        "text": "Option 3"
+      },
+      {
+        "id": "4",
+        "text": "Option 4"
+      },
+      {
+        "id": "5",
+        "text": "Option 5"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(4)",
+    "explanation": "From first figure to second figure only the upper half of the design is left.",
+    "solutionImages": [],
+    "pdfPage": 258
+  },
+  {
+    "id": 13,
+    "setNumber": 20,
+    "questionNumber": 13,
+    "instruction": "",
+    "statement": "Which two sets of letters will come next in the following series? \nBCE, FGI, JKM, NOQ, ________, ________.",
+    "type": "two_part_letter",
+    "images": [],
+    "options": [],
+    "dropdownGroups": [],
+    "correctAnswer": "RSU, VWY",
+    "explanation": "In each set of elements, second letter will be removed from the series according to alphabetical order.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 14,
+    "setNumber": 20,
+    "questionNumber": 14,
+    "instruction": "",
+    "statement": "Write the number of the figure which will come next in the series:",
+    "type": "single_choice",
+    "images": [
+      "/images/set20/q14_Image1410.png",
+      "/images/set20/q14_Image1411.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Option 1"
+      },
+      {
+        "id": "2",
+        "text": "Option 2"
+      },
+      {
+        "id": "3",
+        "text": "Option 3"
+      },
+      {
+        "id": "4",
+        "text": "Option 4"
+      },
+      {
+        "id": "5",
+        "text": "Option 5"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(1)",
+    "explanation": "𝐺 − 2 = 𝐸; 𝑆 − 2 = 𝑄; 𝐼 − 2 = 𝐺; 𝐾 − 2 = 𝐼\n𝐸 − 3 = 𝐵; 𝑄 − 3 = 𝑁; 𝐺 − 3 = 𝐷; 𝐼 − 3 = 𝐹\n𝐵 − 4 = 𝑋; 𝑁 − 4 = 𝐽; 𝐷 − 4 = 𝑍; 𝐹 − 4 = 𝐵\nThus, option (1) is the correct answer.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 15,
+    "setNumber": 20,
+    "questionNumber": 15,
+    "instruction": "",
+    "statement": "Which item will stand middle if the following are rearranged proper order?",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Printer"
+      },
+      {
+        "id": "2",
+        "text": "Publisher"
+      },
+      {
+        "id": "3",
+        "text": "Writer"
+      },
+      {
+        "id": "4",
+        "text": "Editor"
+      },
+      {
+        "id": "5",
+        "text": "Seller"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(1)",
+    "explanation": "The rearranged proper order of the given words is Writer, Editor, Printer, Publisher, Seller.\nHere, Printer is the middle term.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 16,
+    "setNumber": 20,
+    "questionNumber": 16,
+    "instruction": "",
+    "statement": "Which word does not belong to the same class as others?",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Heart"
+      },
+      {
+        "id": "2",
+        "text": "Veins"
+      },
+      {
+        "id": "3",
+        "text": "Intestine"
+      },
+      {
+        "id": "4",
+        "text": "Arteries"
+      },
+      {
+        "id": "5",
+        "text": "Hypertension"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(3)",
+    "explanation": "Heart, Hypertension, veins, and arteries are involved in circulatory system of animals while\nintestine involved in excretory system of animals.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 17,
+    "setNumber": 20,
+    "questionNumber": 17,
+    "instruction": "",
+    "statement": "Write the number of the figure which will come next in the series:",
+    "type": "single_choice",
+    "images": [
+      "/images/set20/q17_Image1412.png",
+      "/images/set20/q17_Image1413.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Option 1"
+      },
+      {
+        "id": "2",
+        "text": "Option 2"
+      },
+      {
+        "id": "3",
+        "text": "Option 3"
+      },
+      {
+        "id": "4",
+        "text": "Option 4"
+      },
+      {
+        "id": "5",
+        "text": "Option 5"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(5)",
+    "explanation": "Two-line segments are added in P 1 to obtain P 2 and one-line segment is added in P 2 to obtain P 3. This\nprocess is repeated again to obtain P4. Hence, answer figure 5 continues the series.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 18,
+    "setNumber": 20,
+    "questionNumber": 18,
+    "instruction": "",
+    "statement": "Choose one word from each of the following three lines to make a correct, true and  meaningful \nsentence. \nHe was [(1) dancing  (2) sitting  (3) running  (4) sleeping]  \non a [(1) fan  (2) Laptop  (3) chair   (4) book]  \nand fell [(1) down  (2) up   (3) near   (4) far] suddenly.",
+    "type": "multi_dropdown",
+    "images": [],
+    "options": [],
+    "dropdownGroups": [
+      {
+        "options": [
+          {
+            "id": "1",
+            "text": "dancing"
+          },
+          {
+            "id": "2",
+            "text": "sitting"
+          },
+          {
+            "id": "3",
+            "text": "running"
+          },
+          {
+            "id": "4",
+            "text": "sleeping"
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "id": "1",
+            "text": "fan"
+          },
+          {
+            "id": "2",
+            "text": "Laptop"
+          },
+          {
+            "id": "3",
+            "text": "chair"
+          },
+          {
+            "id": "4",
+            "text": "book"
+          }
+        ]
+      },
+      {
+        "options": [
+          {
+            "id": "1",
+            "text": "down"
+          },
+          {
+            "id": "2",
+            "text": "up"
+          },
+          {
+            "id": "3",
+            "text": "near"
+          },
+          {
+            "id": "4",
+            "text": "far"
+          }
+        ]
+      }
+    ],
+    "correctAnswer": "2, 3, 1",
+    "explanation": "Sitting, chair, down.\nThe meaningful sentence is “He was sitting on a chair and fell down.”",
+    "solutionImages": [],
+    "pdfPage": 259
+  },
+  {
+    "id": 19,
+    "setNumber": 20,
+    "questionNumber": 19,
+    "instruction": "",
+    "statement": "Write the number which will come LAST in the dictionary?",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Contact"
+      },
+      {
+        "id": "2",
+        "text": "Create"
+      },
+      {
+        "id": "3",
+        "text": "Creep"
+      },
+      {
+        "id": "4",
+        "text": "Cheater"
+      },
+      {
+        "id": "5",
+        "text": "Concentrate"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(3)",
+    "explanation": "Among these given words, Creep will come last in the dictionary.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 20,
+    "setNumber": 20,
+    "questionNumber": 20,
+    "instruction": "",
+    "statement": "Subtract:\nFind the missing number in the box.",
+    "type": "numerical",
+    "images": [
+      "/images/set20/q20_Image1416.png"
+    ],
+    "options": [],
+    "dropdownGroups": [],
+    "correctAnswer": "3",
+    "explanation": "2140 - 1047 = 1093. The missing number in the box is 3.",
+    "solutionImages": [
+      "/images/set20/sol_q20_Image1450.png"
+    ],
+    "pdfPage": 256
+  },
+  {
+    "id": 21,
+    "setNumber": 20,
+    "questionNumber": 21,
+    "instruction": "",
+    "statement": "Write the number of the figure which will come next in the series:",
+    "type": "single_choice",
+    "images": [
+      "/images/set20/q21_Image1417.png",
+      "/images/set20/q21_Image1418.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Option 1"
+      },
+      {
+        "id": "2",
+        "text": "Option 2"
+      },
+      {
+        "id": "3",
+        "text": "Option 3"
+      },
+      {
+        "id": "4",
+        "text": "Option 4"
+      },
+      {
+        "id": "5",
+        "text": "Option 5"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(2)",
+    "explanation": "The elements are shifted by one side in anti -clockwise direction. Simultaneously, one element is\nincreased from previous elements.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 22,
+    "setNumber": 20,
+    "questionNumber": 22,
+    "instruction": "",
+    "statement": "Which group of numbers does not belong to the same class as others?",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "6152"
+      },
+      {
+        "id": "2",
+        "text": "7123"
+      },
+      {
+        "id": "3",
+        "text": "5512"
+      },
+      {
+        "id": "4",
+        "text": "3375"
+      },
+      {
+        "id": "5",
+        "text": "6421"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(4)",
+    "explanation": "The sum of all digits in the given number is 13 in all options except option 4.\n6152 = 6 + 1 + 5 + 2 = 13\n7123 = 7 + 1 + 2 + 3 = 13\n5512 = 5 + 5 + 1 + 2 = 13\n3375 = 3 + 3 + 7 + 5 = 18\n6421 = 6 + 4 + 2 + 1= 13\nThus option 4 is the correct answer.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 23,
+    "setNumber": 20,
+    "questionNumber": 23,
+    "instruction": "",
+    "statement": "Add:\nFind the missing number in the box.",
+    "type": "numerical",
+    "images": [
+      "/images/set20/q23_Image1419.png"
+    ],
+    "options": [],
+    "dropdownGroups": [],
+    "correctAnswer": "5",
+    "explanation": "234 + 123 = 357. The missing number in the box is 5.",
+    "solutionImages": [
+      "/images/set20/sol_q23_Image1451.png"
+    ],
+    "pdfPage": 256
+  },
+  {
+    "id": 24,
+    "setNumber": 20,
+    "questionNumber": 24,
+    "instruction": "",
+    "statement": "Write the number of the figure which will come next in the series:",
+    "type": "single_choice",
+    "images": [
+      "/images/set20/q24_Image1420.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Option 1"
+      },
+      {
+        "id": "2",
+        "text": "Option 2"
+      },
+      {
+        "id": "3",
+        "text": "Option 3"
+      },
+      {
+        "id": "4",
+        "text": "Option 4"
+      },
+      {
+        "id": "5",
+        "text": "Option 5"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(3)",
+    "explanation": "This is an alternating series. In the first segment, the letter \"E\" faces right, then down, then right. In the\nsecond segment, all the letters face down. To follow this pattern, in the fo urth segment, all the letters\nmust face up.",
+    "solutionImages": [],
+    "pdfPage": 260
+  },
+  {
+    "id": 25,
+    "setNumber": 20,
+    "questionNumber": 25,
+    "instruction": "",
+    "statement": "Which two of the following figures belong to Class A?",
+    "type": "multiple_choice",
+    "images": [
+      "/images/set20/q25_Image1423.png",
+      "/images/set20/q25_Image1424.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Figure 1"
+      },
+      {
+        "id": "2",
+        "text": "Figure 2"
+      },
+      {
+        "id": "3",
+        "text": "Figure 3"
+      },
+      {
+        "id": "4",
+        "text": "Figure 4"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "1 and 2",
+    "explanation": "Analyzing the shapes in respective sections of class A, and the letters are only vowels.\nHence, figures (1) and (2) belong to Class A.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 26,
+    "setNumber": 20,
+    "questionNumber": 26,
+    "instruction": "",
+    "statement": "Write the number of the word which will come last in the dictionary.",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Amoeba"
+      },
+      {
+        "id": "2",
+        "text": "Bacteria"
+      },
+      {
+        "id": "3",
+        "text": "Germs"
+      },
+      {
+        "id": "4",
+        "text": "Common"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(3)",
+    "explanation": "Among these given words, Germs will come last in the dictionary.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 27,
+    "setNumber": 20,
+    "questionNumber": 27,
+    "instruction": "",
+    "statement": "Write the number of the word which will come last in the dictionary.",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Irritation"
+      },
+      {
+        "id": "2",
+        "text": "Individuals"
+      },
+      {
+        "id": "3",
+        "text": "Imagination"
+      },
+      {
+        "id": "4",
+        "text": "Intelligent"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(1)",
+    "explanation": "Among these given words, Irritation will come last in the dictionary.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 28,
+    "setNumber": 20,
+    "questionNumber": 28,
+    "instruction": "",
+    "statement": "Write the number of the correct choice. \nHow many 7’s come just before 3 in the following numbers? \n1 7 3 4 3 5 8 2 6 8 9 6 2 5 4 7 3 6 1 3 7 3 2 6 5 4 2 1 7 3 5 2 4 6 2 4 2 6 9 8",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "1"
+      },
+      {
+        "id": "2",
+        "text": "3"
+      },
+      {
+        "id": "3",
+        "text": "2"
+      },
+      {
+        "id": "4",
+        "text": "4"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(4)",
+    "explanation": "There are four 7’s come just before 3 in the given numbers.\nThey are",
+    "solutionImages": [
+      "/images/set20/sol_q28_Image1454.png"
+    ],
+    "pdfPage": 256
+  },
+  {
+    "id": 29,
+    "setNumber": 20,
+    "questionNumber": 29,
+    "instruction": "",
+    "statement": "Write the number of the word which will come last in the dictionary.",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Barracuda"
+      },
+      {
+        "id": "2",
+        "text": "Shark"
+      },
+      {
+        "id": "3",
+        "text": "Hoof"
+      },
+      {
+        "id": "4",
+        "text": "Lizard"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(2)",
+    "explanation": "Among these given words, Shark will come last in the dictionary.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 30,
+    "setNumber": 20,
+    "questionNumber": 30,
+    "instruction": "",
+    "statement": "Write the number of the word which will come last in the dictionary.",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Abundance"
+      },
+      {
+        "id": "2",
+        "text": "Plentiful"
+      },
+      {
+        "id": "3",
+        "text": "Pairs"
+      },
+      {
+        "id": "4",
+        "text": "Mammal"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(2)",
+    "explanation": "Among these given words, Plentiful will come last in the dictionary.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 31,
+    "setNumber": 20,
+    "questionNumber": 31,
+    "instruction": "",
+    "statement": "The underlined statement has four reasons for its justification. They are listed below the statement \nserially. Write the serial number of the reason you think correct. \nVincent has a paper route. Each morning, he delivers 37 newspapers to customers in his neighbourhood. \nIt takes Vincent 50 minutes to deliver all the papers. If Vincent is sick or has other plans, his friend \nThomas, who lives on the same street, will sometimes deliver the papers for him.",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Vincent and Thomas live in the same neighbourhood."
+      },
+      {
+        "id": "2",
+        "text": "It takes Thomas more than 50 minutes to deliver the papers"
+      },
+      {
+        "id": "3",
+        "text": "It is dark outside when Vincent begins his deliveries."
+      },
+      {
+        "id": "4",
+        "text": "Thomas would like to have his own paper route."
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(1)",
+    "explanation": "The fact that Vincent and Thomas live on the same street indicates that they live in the sam e\nneighborhood. There is no support for any of the other choices.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 32,
+    "setNumber": 20,
+    "questionNumber": 32,
+    "instruction": "",
+    "statement": "Write the number of the word which will come last in the dictionary?",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Node"
+      },
+      {
+        "id": "2",
+        "text": "Across"
+      },
+      {
+        "id": "3",
+        "text": "Oxygen"
+      },
+      {
+        "id": "4",
+        "text": "function"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(3)",
+    "explanation": "Among these given words, Oxygen will come last in the dictionary.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 33,
+    "setNumber": 20,
+    "questionNumber": 33,
+    "instruction": "",
+    "statement": "Write the number of the correct choice. \nTwo bus tickets from city A to B and three tickets from city A to C cost Rs. 77 but three tickets from city \nA to B and two tickets from city A to C cost Rs. 73. What are the fares for cities B and C from A?",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Rs. 4, Rs. 23"
+      },
+      {
+        "id": "2",
+        "text": "Rs. 13, Rs. 17"
+      },
+      {
+        "id": "3",
+        "text": "Rs. 15, Rs. 14"
+      },
+      {
+        "id": "4",
+        "text": "Rs. 17, Rs. 13"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(2)",
+    "explanation": "Let Rs. x be the fare of city B from city A and Rs. y be the fare of city C from city A.\nThen, 2x + 3y = 77 ...(i) and\n3x + 2y = 73 ...(ii)\nMultiplying (i) by 3 and (ii) by 2 and subtracting, we get: 5y = 85 or y = 17.\nPutting y = 17 in (i), we get: x = 13.",
+    "solutionImages": [],
+    "pdfPage": 261
+  },
+  {
+    "id": 34,
+    "setNumber": 20,
+    "questionNumber": 34,
+    "instruction": "",
+    "statement": "Which two of the following figures belong to Class A?",
+    "type": "multiple_choice",
+    "images": [
+      "/images/set20/q34_Image1427.png",
+      "/images/set20/q34_Image1428.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Figure 1"
+      },
+      {
+        "id": "2",
+        "text": "Figure 2"
+      },
+      {
+        "id": "3",
+        "text": "Figure 3"
+      },
+      {
+        "id": "4",
+        "text": "Figure 4"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "1 and 4",
+    "explanation": "Class A has up down arrows in first column and down and up arrows i n next two columns and also has\nvowels.\nHence, figures (1) and (4) belong to Class A.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 35,
+    "setNumber": 20,
+    "questionNumber": 35,
+    "instruction": "",
+    "statement": "Which two of the following figures belong to Class A?",
+    "type": "multiple_choice",
+    "images": [
+      "/images/set20/q35_Image1429.png",
+      "/images/set20/q35_Image1430.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Figure 1"
+      },
+      {
+        "id": "2",
+        "text": "Figure 2"
+      },
+      {
+        "id": "3",
+        "text": "Figure 3"
+      },
+      {
+        "id": "4",
+        "text": "Figure 4"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "1 and 2",
+    "explanation": "The class A figures are vertically bisected.\nHence, figures (1) and (2) belong to Class A.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 36,
+    "setNumber": 20,
+    "questionNumber": 36,
+    "instruction": "",
+    "statement": "Identify the correct figure to continue the series / complete the pattern.",
+    "type": "single_choice",
+    "images": [
+      "/images/set20/q36_Image1431.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Option 1"
+      },
+      {
+        "id": "2",
+        "text": "Option 2"
+      },
+      {
+        "id": "3",
+        "text": "Option 3"
+      },
+      {
+        "id": "4",
+        "text": "Option 4"
+      },
+      {
+        "id": "5",
+        "text": "Option 5"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(3)",
+    "explanation": "From first figure to second figure, the main design is rotated through 180° while the small circle shifts to\nits opposite side.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 37,
+    "setNumber": 20,
+    "questionNumber": 37,
+    "instruction": "",
+    "statement": "Nadir is to zenith as fear is to ___________.",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Score"
+      },
+      {
+        "id": "2",
+        "text": "Italian"
+      },
+      {
+        "id": "3",
+        "text": "Loafer"
+      },
+      {
+        "id": "4",
+        "text": "Composure"
+      },
+      {
+        "id": "5",
+        "text": "Cousin"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(4)",
+    "explanation": "Nadir is the opposite of zenith, and fear is the opposite of composure.",
+    "solutionImages": [],
+    "pdfPage": 262
+  },
+  {
+    "id": 38,
+    "setNumber": 20,
+    "questionNumber": 38,
+    "instruction": "",
+    "statement": "Which two of the following figures belong to Class A?",
+    "type": "multiple_choice",
+    "images": [
+      "/images/set20/q38_Image1434.png",
+      "/images/set20/q38_Image1435.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Figure 1"
+      },
+      {
+        "id": "2",
+        "text": "Figure 2"
+      },
+      {
+        "id": "3",
+        "text": "Figure 3"
+      },
+      {
+        "id": "4",
+        "text": "Figure 4"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "1 and 3",
+    "explanation": "When a, b, c, d, ……is numbered as 1, 2, 3, 4, …… respectively, the class A has codes of alphabets as same\nas its respective numbers.\nHence, figures (1) and (3) belong to Class A.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 39,
+    "setNumber": 20,
+    "questionNumber": 39,
+    "instruction": "",
+    "statement": "Which two of the following figures belong to Class A?",
+    "type": "multiple_choice",
+    "images": [
+      "/images/set20/q39_Image1436.png",
+      "/images/set20/q39_Image1437.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Figure 1"
+      },
+      {
+        "id": "2",
+        "text": "Figure 2"
+      },
+      {
+        "id": "3",
+        "text": "Figure 3"
+      },
+      {
+        "id": "4",
+        "text": "Figure 4"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "2 and 3",
+    "explanation": "The white dots are placed near the corners of the hexagon in class A.\nHence, figures (2) and (3) belong to Class A.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 40,
+    "setNumber": 20,
+    "questionNumber": 40,
+    "instruction": "",
+    "statement": "Which word does not belong to the same class as others?",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Trombone"
+      },
+      {
+        "id": "2",
+        "text": "Saxophone"
+      },
+      {
+        "id": "3",
+        "text": "Xylophone"
+      },
+      {
+        "id": "4",
+        "text": "Trumpet"
+      },
+      {
+        "id": "5",
+        "text": "Bassoons"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(3)",
+    "explanation": "Xylophone is a percussion instrument while others belong to family of wind instruments.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 41,
+    "setNumber": 20,
+    "questionNumber": 41,
+    "instruction": "",
+    "statement": "Write the SECOND letter of the rearranged word. \nI like this bucket list TETERB",
+    "type": "text",
+    "images": [],
+    "options": [],
+    "dropdownGroups": [],
+    "correctAnswer": "E",
+    "explanation": "The rearranged word is BETTER and its SECOND letter is “E”.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 42,
+    "setNumber": 20,
+    "questionNumber": 42,
+    "instruction": "",
+    "statement": "Write the last letter of the rearranged sentence. \nholding in her hand she into the letter ran a room",
+    "type": "text",
+    "images": [],
+    "options": [],
+    "dropdownGroups": [],
+    "correctAnswer": "M",
+    "explanation": "The rearranged sentence is:\nHolding a letter in her hand she ran into the room.\nThen, the last letter of the rearranged sentence is ‘m’.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 43,
+    "setNumber": 20,
+    "questionNumber": 43,
+    "instruction": "",
+    "statement": "Identify the correct figure to continue the series / complete the pattern.",
+    "type": "single_choice",
+    "images": [
+      "/images/set20/q43_Image1438.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Option 1"
+      },
+      {
+        "id": "2",
+        "text": "Option 2"
+      },
+      {
+        "id": "3",
+        "text": "Option 3"
+      },
+      {
+        "id": "4",
+        "text": "Option 4"
+      },
+      {
+        "id": "5",
+        "text": "Option 5"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(3)",
+    "explanation": "The figure rotates 90 degree anticlockwise and shaded inverted image which is added to the top. Hence,\noption (3) is the correct answer.",
+    "solutionImages": [],
+    "pdfPage": 263
+  },
+  {
+    "id": 44,
+    "setNumber": 20,
+    "questionNumber": 44,
+    "instruction": "",
+    "statement": "Identify the correct figure to continue the series / complete the pattern.",
+    "type": "single_choice",
+    "images": [
+      "/images/set20/q44_Image1441.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Option 1"
+      },
+      {
+        "id": "2",
+        "text": "Option 2"
+      },
+      {
+        "id": "3",
+        "text": "Option 3"
+      },
+      {
+        "id": "4",
+        "text": "Option 4"
+      },
+      {
+        "id": "5",
+        "text": "Option 5"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(2)",
+    "explanation": "Four parts of the outer end lost.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 45,
+    "setNumber": 20,
+    "questionNumber": 45,
+    "instruction": "",
+    "statement": "Which two numbers will come next in the following series? \n2, 1, \n1\n2, _______, _______",
+    "type": "two_part_number",
+    "images": [],
+    "options": [],
+    "dropdownGroups": [],
+    "correctAnswer": "𝟏",
+    "explanation": "𝟒 and\n𝟏\n𝟖\nThis is a simple division series; each number is one-half of the previous number.\nIn other terms to say, the number is divided by 2 successively to get the next result.\n4\n2  =  2\n2\n2  =  1\n1\n2  =\n1\n2\n(12)\n2  =\n1\n4\n(14)\n2   =\n1\n8 and so on.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 46,
+    "setNumber": 20,
+    "questionNumber": 46,
+    "instruction": "",
+    "statement": "Prejudice is to Bias as Damage is to __________.",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Fair"
+      },
+      {
+        "id": "2",
+        "text": "Treacherous"
+      },
+      {
+        "id": "3",
+        "text": "Anxious"
+      },
+      {
+        "id": "4",
+        "text": "Destruction"
+      },
+      {
+        "id": "5",
+        "text": "Produce"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(4)",
+    "explanation": "As Bias is the synonym of Prejudice. Similarly, Destruction is the synonym of Damage.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 47,
+    "setNumber": 20,
+    "questionNumber": 47,
+    "instruction": "",
+    "statement": "Which two of the following figures belong to Class A?",
+    "type": "multiple_choice",
+    "images": [
+      "/images/set20/q47_Image1442.png",
+      "/images/set20/q47_Image1443.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Figure 1"
+      },
+      {
+        "id": "2",
+        "text": "Figure 2"
+      },
+      {
+        "id": "3",
+        "text": "Figure 3"
+      },
+      {
+        "id": "4",
+        "text": "Figure 4"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "2 and 3",
+    "explanation": "Class A has even number of arrows with equal half shaded; figure 2 and 3 matched that property\nHence, figures (2) and (3) belong to Class A.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 48,
+    "setNumber": 20,
+    "questionNumber": 48,
+    "instruction": "",
+    "statement": "Which two of the following figures belong to Class A?",
+    "type": "multiple_choice",
+    "images": [
+      "/images/set20/q48_Image1444.png",
+      "/images/set20/q48_Image1445.png"
+    ],
+    "options": [
+      {
+        "id": "1",
+        "text": "Figure 1"
+      },
+      {
+        "id": "2",
+        "text": "Figure 2"
+      },
+      {
+        "id": "3",
+        "text": "Figure 3"
+      },
+      {
+        "id": "4",
+        "text": "Figure 4"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "1 and 3",
+    "explanation": "Class A consists of one left arrow one up arrow and one down arrow irrespective of their places.\nHence, figures (1) and (3) belong to Class A.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 49,
+    "setNumber": 20,
+    "questionNumber": 49,
+    "instruction": "",
+    "statement": "Which group of letters does not belong to the same class as others?",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "BDFL"
+      },
+      {
+        "id": "2",
+        "text": "PRUZ"
+      },
+      {
+        "id": "3",
+        "text": "JLOT"
+      },
+      {
+        "id": "4",
+        "text": "CHEM"
+      },
+      {
+        "id": "5",
+        "text": "IKNS"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(1)",
+    "explanation": "Option (1) → B+2=D+2=F+6=L\nOption (2) → P+2=R+3=U+5=Z\nOption (3) → J+2=L+3=O+5=T\nOption (4) → C+2=E+3=H+5=M\nOption (5) → I+2=K+3=N+5=S\nAmong these options, 1 is different from others. Thus option (1) BDFL is the correct answer.",
+    "solutionImages": [],
+    "pdfPage": 256
+  },
+  {
+    "id": 50,
+    "setNumber": 20,
+    "questionNumber": 50,
+    "instruction": "",
+    "statement": "Which word does not belong to the same class as others?",
+    "type": "single_choice",
+    "images": [],
+    "options": [
+      {
+        "id": "1",
+        "text": "Jazz"
+      },
+      {
+        "id": "2",
+        "text": "Rock"
+      },
+      {
+        "id": "3",
+        "text": "Salsa"
+      },
+      {
+        "id": "4",
+        "text": "Ballet"
+      },
+      {
+        "id": "5",
+        "text": "Classic"
+      }
+    ],
+    "dropdownGroups": [],
+    "correctAnswer": "(3)",
+    "explanation": "Except Salsa, all other are types of music.",
+    "solutionImages": [],
+    "pdfPage": 264
+  }
+]
