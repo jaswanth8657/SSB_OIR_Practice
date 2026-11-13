@@ -20,9 +20,22 @@ import {
   hydrateActiveExamCache,
   invalidateActiveExamCache,
   isStateDeepEqual,
+  strictDeepEqual,
+  validateStorageEnvelope,
+  migrateLegacyActiveExam,
+  quarantineSetForHydration,
+  isSetQuarantined,
+  releaseSetQuarantine,
+  getActiveExamSync,
+  readLocalActiveExamEnvelope,
+  readIdbActiveExamEnvelope,
+  writeLocalActiveExamEnvelope,
+  withRecoveryLock,
+  acquireIdbLeaseWithFencing,
+  checkLeaseOwnership,
   DEFAULT_SETTINGS,
 } from '../src/utils/storage';
-import { Question, ActiveExamState, TestAttempt } from '../src/types/oir';
+import { Question, ActiveExamState, TestAttempt, VersionedActiveExamRecord } from '../src/types/oir';
 
 describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
   // In-memory localStorage mock
@@ -149,7 +162,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
   });
 
   // 4. In-progress retake status prioritization
-  it('prioritizes in_progress status during retake while preserving historical completed attempts', () => {
+  it('prioritizes in_progress status during retake while preserving historical completed attempts', async () => {
     const att1: TestAttempt = {
       attemptId: 'att_1_1',
       setNumber: 1,
@@ -182,7 +195,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       currentQuestionStartedAt: Date.now(),
       questionExpiredMap: {},
     };
-    saveActiveExam(activeRetakeState);
+    await saveActiveExam(activeRetakeState);
 
     // During retake, status MUST report 'in_progress' to show Resume button,
     // but MUST preserve attempt history, attemptsCount, bestScore, and lastAttemptTimestamp
@@ -193,7 +206,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
     expect(progressDuringRetake.lastAttemptTimestamp).toBe(1000);
 
     // Clean up active exam
-    clearActiveExam(1);
+    await clearActiveExam(1);
     expect(getSetProgress(1).status).toBe('completed');
   });
 
@@ -902,7 +915,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
         questionExpiredMap: {},
       };
 
-      saveActiveExam(activeState);
+      await saveActiveExam(activeState);
       expect(await getActiveExam(1)).not.toBeNull();
 
       const res = await checkAndRecoverExpiredExam(1, mockQuestions, DEFAULT_SETTINGS);
@@ -943,7 +956,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
         questionExpiredMap: {},
       };
 
-      saveActiveExam(activeState);
+      await saveActiveExam(activeState);
 
       // Genuinely simulate two concurrent tabs calling recovery at the same time
       const [res1, res2] = await Promise.all([
@@ -951,7 +964,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
         checkAndRecoverExpiredExam(3, mockQuestions, DEFAULT_SETTINGS),
       ]);
 
-      const validStatuses = ['recovered', 'already_recovered'];
+      const validStatuses = ['recovered', 'already_recovered', 'recovery_in_progress'];
       expect(validStatuses).toContain(res1.status);
       expect(validStatuses).toContain(res2.status);
 
@@ -984,8 +997,8 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
         questionExpiredMap: {},
       };
 
-      saveActiveExam(stateSet5);
-      saveActiveExam(stateSet7);
+      await saveActiveExam(stateSet5);
+      await saveActiveExam(stateSet7);
 
       const [resSet5, resSet7] = await Promise.all([
         checkAndRecoverExpiredExam(5, mockQuestions, DEFAULT_SETTINGS),
@@ -1011,7 +1024,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
         questionExpiredMap: {},
       };
 
-      saveActiveExam(activeState);
+      await saveActiveExam(activeState);
 
       // Simulate localStorage failure when saving attempts
       vi.stubGlobal('localStorage', {
@@ -1050,7 +1063,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
         questionExpiredMap: {},
       };
 
-      saveActiveExam(activeState);
+      await saveActiveExam(activeState);
       const res = await checkAndRecoverExpiredExam(2, mockQuestions, DEFAULT_SETTINGS);
       expect(res.status).toBe('not_expired');
       expect(await getActiveExam(2)).not.toBeNull();
@@ -1108,7 +1121,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
 
       const result = await saveActiveExam(state);
       expect(result.success).toBe(true);
-      expect(result.storageType).toBe('localStorage');
+      expect(['indexedDB', 'localStorage']).toContain(result.storageType);
 
       const loaded = await getActiveExam(15);
       expect(loaded).not.toBeNull();
@@ -1511,6 +1524,697 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       const diffExpired = JSON.parse(JSON.stringify(baseState));
       diffExpired.questionExpiredMap[2] = true;
       expect(isStateDeepEqual(baseState, diffExpired)).toBe(false);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // SIXTH-PASS CRITICAL STORAGE & RECOVERY VERIFICATION SUITE
+  // --------------------------------------------------------------------------
+  describe('Sixth-Pass Critical Storage & Recovery Suite (Pass 6 Audit Requirements)', () => {
+    // ------------------------------------------------------------------------
+    // SECTION 2: Revision Allocation and Out-of-Order Persistence
+    // ------------------------------------------------------------------------
+    describe('Section 2: In-Transaction Revision Allocation & Persistence Ordering', () => {
+      it('two rapid saves for the same set allocate sequential revisions and preserve newest answers', async () => {
+        const now = Date.now();
+        const state1: ActiveExamState = {
+          setNumber: 8,
+          currentQuestionIndex: 2,
+          userAnswers: { 1: { questionNumber: 1, selectedOption: 'A', isAnswered: true } },
+          examStartTime: now - 5000,
+          examEndTime: now + 20 * 60 * 1000,
+          questionTimeLeft: { 2: 30 },
+          currentQuestionStartedAt: now - 5000,
+          questionExpiredMap: {},
+          sessionId: 'sess_test_rapid_1',
+        };
+
+        const state2: ActiveExamState = {
+          ...state1,
+          currentQuestionIndex: 3,
+          userAnswers: {
+            1: { questionNumber: 1, selectedOption: 'A', isAnswered: true },
+            2: { questionNumber: 2, selectedOption: 'B', isAnswered: true },
+          },
+          questionTimeLeft: { 3: 40 },
+        };
+
+        const [res1, res2] = await Promise.all([
+          saveActiveExam(state1),
+          saveActiveExam(state2),
+        ]);
+
+        expect(res1.success).toBe(true);
+        expect(res2.success).toBe(true);
+
+        const loaded = await getActiveExam(8);
+        expect(loaded).not.toBeNull();
+        expect(loaded?.currentQuestionIndex).toBe(3);
+        expect(loaded?.userAnswers[2]?.selectedOption).toBe('B');
+        expect(loaded?.questionTimeLeft[3]).toBe(40);
+
+        const env = readLocalActiveExamEnvelope(8);
+        expect(env).not.toBeNull();
+        expect(env?.revision).toBeGreaterThanOrEqual(2);
+      });
+
+      it('prefers IndexedDB revision 8 when localStorage has revision 5 and repairs localStorage', async () => {
+        const now = Date.now();
+        const baseState: ActiveExamState = {
+          setNumber: 9,
+          currentQuestionIndex: 5,
+          userAnswers: { 1: { questionNumber: 1, selectedOption: '1', isAnswered: true } },
+          examStartTime: now,
+          examEndTime: now + 10000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now,
+          questionExpiredMap: {},
+          sessionId: 'sess_rev_split_9',
+        };
+
+        const newerState: ActiveExamState = {
+          ...baseState,
+          currentQuestionIndex: 12,
+          userAnswers: {
+            1: { questionNumber: 1, selectedOption: '1', isAnswered: true },
+            2: { questionNumber: 2, selectedOption: '4', isAnswered: true },
+          },
+        };
+
+        // Write revision 5 to localStorage
+        writeLocalActiveExamEnvelope({
+          setNumber: 9,
+          revision: 5,
+          updatedAt: now - 1000,
+          sessionId: 'sess_rev_split_9',
+          storageVersion: 1,
+          isDeleted: false,
+          state: baseState,
+        });
+
+        // Write revision 8 directly to IndexedDB
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const req = indexedDB.open('oir_hub_coordination', 2);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction('active_exams', 'readwrite');
+          const store = tx.objectStore('active_exams');
+          store.put({
+            setNumber: 9,
+            revision: 8,
+            updatedAt: now,
+            sessionId: 'sess_rev_split_9',
+            storageVersion: 1,
+            isDeleted: false,
+            state: newerState,
+          });
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => {
+            db.close();
+            reject();
+          };
+        });
+
+        invalidateActiveExamCache(9);
+
+        const authoritative = await getActiveExam(9);
+        expect(authoritative).not.toBeNull();
+        expect(authoritative?.currentQuestionIndex).toBe(12);
+        expect(authoritative?.userAnswers[2]?.selectedOption).toBe('4');
+
+        // Verify localStorage was repaired to revision 8
+        const localEnv = readLocalActiveExamEnvelope(9);
+        expect(localEnv).not.toBeNull();
+        expect(localEnv?.revision).toBe(8);
+        expect(localEnv?.state?.currentQuestionIndex).toBe(12);
+      });
+
+      it('allocates revision strictly above current maximum when saving after stale cache', async () => {
+        const now = Date.now();
+        const state: ActiveExamState = {
+          setNumber: 16,
+          currentQuestionIndex: 1,
+          userAnswers: {},
+          examStartTime: now,
+          examEndTime: now + 15000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now,
+          questionExpiredMap: {},
+          sessionId: 'sess_stale_16',
+        };
+
+        // Seed with revision 4
+        writeLocalActiveExamEnvelope({
+          setNumber: 16,
+          revision: 4,
+          updatedAt: now - 500,
+          sessionId: 'sess_stale_16',
+          storageVersion: 1,
+          isDeleted: false,
+          state,
+        });
+
+        const res = await saveActiveExam({
+          ...state,
+          currentQuestionIndex: 2,
+        });
+
+        expect(res.success).toBe(true);
+
+        const loaded = await getActiveExam(16);
+        expect(loaded?.currentQuestionIndex).toBe(2);
+
+        const localEnv = readLocalActiveExamEnvelope(16);
+        expect(localEnv?.revision).toBeGreaterThanOrEqual(5);
+      });
+
+      it('survives saved answer change followed immediately by refresh/restoration', async () => {
+        const now = Date.now();
+        const initialState: ActiveExamState = {
+          setNumber: 17,
+          currentQuestionIndex: 0,
+          userAnswers: {},
+          examStartTime: now,
+          examEndTime: now + 30000,
+          questionTimeLeft: { 1: 40 },
+          currentQuestionStartedAt: now,
+          questionExpiredMap: {},
+          sessionId: 'sess_refresh_17',
+        };
+
+        await saveActiveExam(initialState);
+
+        // Update answer
+        const updatedState: ActiveExamState = {
+          ...initialState,
+          userAnswers: { 1: { questionNumber: 1, selectedOption: '3', isAnswered: true } },
+          questionTimeLeft: { 1: 22 },
+        };
+        await saveActiveExam(updatedState);
+
+        // Simulate refresh by invalidating in-memory cache
+        invalidateActiveExamCache(17);
+
+        const restored = await getActiveExam(17);
+        expect(restored).not.toBeNull();
+        expect(restored?.userAnswers[1]?.selectedOption).toBe('3');
+        expect(restored?.questionTimeLeft[1]).toBe(22);
+      });
+    });
+
+    // ------------------------------------------------------------------------
+    // SECTION 3: Versioned Deletion Tombstones & Stale-Session Protection
+    // ------------------------------------------------------------------------
+    describe('Section 3: Versioned Deletion Tombstones & Stale Session Protection', () => {
+      it('clearActiveExam persists a versioned tombstone with incremented revision and isDeleted: true', async () => {
+        const now = Date.now();
+        const activeState: ActiveExamState = {
+          setNumber: 18,
+          currentQuestionIndex: 4,
+          userAnswers: {},
+          examStartTime: now,
+          examEndTime: now + 20000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now,
+          questionExpiredMap: {},
+          sessionId: 'sess_tombstone_18',
+        };
+
+        await saveActiveExam(activeState);
+
+        const clearRes = await clearActiveExam(18);
+        expect(clearRes.success).toBe(true);
+        expect(clearRes.tombstone).toBeDefined();
+        expect(clearRes.tombstone?.isDeleted).toBe(true);
+        expect(clearRes.tombstone?.revision).toBeGreaterThanOrEqual(2);
+
+        // Reading back via both sync and async paths returns null
+        expect(getActiveExamSync(18)).toBeNull();
+        expect(await getActiveExam(18)).toBeNull();
+
+        // Tombstone exists durably in localStorage replica
+        const localEnv = readLocalActiveExamEnvelope(18);
+        expect(localEnv).not.toBeNull();
+        expect(localEnv?.isDeleted).toBe(true);
+        expect(localEnv?.state).toBeUndefined();
+      });
+
+      it('rejects stale save from a session that has already been tombstoned', async () => {
+        const now = Date.now();
+        const sessionId = 'sess_cleared_stale_19';
+        const activeState: ActiveExamState = {
+          setNumber: 19,
+          currentQuestionIndex: 3,
+          userAnswers: {},
+          examStartTime: now,
+          examEndTime: now + 10000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now,
+          questionExpiredMap: {},
+          sessionId,
+        };
+
+        await saveActiveExam(activeState);
+        await clearActiveExam(19);
+
+        // Stale tab attempts to save with the cleared sessionId
+        const staleRes = await saveActiveExam(activeState);
+        expect(staleRes.success).toBe(false);
+        expect(staleRes.error).toContain('cannot be resurrected');
+
+        // Active exam remains null
+        expect(await getActiveExam(19)).toBeNull();
+      });
+
+      it('allows genuinely new exam retake with a fresh sessionId to succeed after tombstone', async () => {
+        const now = Date.now();
+        const oldSessionId = 'sess_old_retake_20';
+        const state1: ActiveExamState = {
+          setNumber: 20,
+          currentQuestionIndex: 1,
+          userAnswers: {},
+          examStartTime: now,
+          examEndTime: now + 10000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now,
+          questionExpiredMap: {},
+          sessionId: oldSessionId,
+        };
+
+        await saveActiveExam(state1);
+        await clearActiveExam(20);
+
+        // Start genuinely new retake with distinct session id
+        const newSessionId = 'sess_new_retake_20_fresh';
+        const state2: ActiveExamState = {
+          setNumber: 20,
+          currentQuestionIndex: 0,
+          userAnswers: { 1: { questionNumber: 1, selectedOption: '2', isAnswered: true } },
+          examStartTime: now + 5000,
+          examEndTime: now + 25 * 60 * 1000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now + 5000,
+          questionExpiredMap: {},
+          sessionId: newSessionId,
+        };
+
+        const retakeRes = await saveActiveExam(state2);
+        expect(retakeRes.success).toBe(true);
+
+        const restored = await getActiveExam(20);
+        expect(restored).not.toBeNull();
+        expect(restored?.sessionId).toBe(newSessionId);
+        expect(restored?.userAnswers[1]?.selectedOption).toBe('2');
+      });
+    });
+
+    // ------------------------------------------------------------------------
+    // SECTION 4: Recovery Lock Ownership & Fencing Tokens
+    // ------------------------------------------------------------------------
+    describe('Section 4: Recovery Lock Fencing & Ownership Verification', () => {
+      it('legitimate owner renews lease with matching fencing token', async () => {
+        const owner = 'legit_owner_1';
+        const acq = await acquireIdbLeaseWithFencing(1, owner, 30000);
+        expect(acq.success).toBe(true);
+        expect(acq.fencingToken).toBeGreaterThanOrEqual(1);
+
+        const renewOk = await renewIdbLease(1, owner, 30000, acq.fencingToken);
+        expect(renewOk).toBe(true);
+
+        await releaseIdbLease(1, owner);
+      });
+
+      it('impostor cannot renew or release another owner lease', async () => {
+        const owner1 = 'real_owner_tab';
+        const impostor = 'impostor_tab';
+
+        const acq = await acquireIdbLeaseWithFencing(2, owner1, 30000);
+        expect(acq.success).toBe(true);
+
+        // Impostor attempts renewal
+        const renewImpostor = await renewIdbLease(2, impostor, 30000, acq.fencingToken);
+        expect(renewImpostor).toBe(false);
+
+        // Impostor attempts release
+        await releaseIdbLease(2, impostor);
+
+        // Real owner must still hold the valid lease
+        const stillValid = await checkLeaseOwnership(2, owner1, acq.fencingToken);
+        expect(stillValid).toBe(true);
+
+        await releaseIdbLease(2, owner1);
+      });
+
+      it('new owner acquires expired lease with strictly incremented fencing token', async () => {
+        const owner1 = 'old_expired_owner';
+        const owner2 = 'new_fresh_owner';
+
+        // Acquire with very short 1ms TTL
+        const acq1 = await acquireIdbLeaseWithFencing(3, owner1, 1);
+        expect(acq1.success).toBe(true);
+
+        // Wait 5ms for lease expiration
+        await new Promise((r) => setTimeout(r, 5));
+
+        const acq2 = await acquireIdbLeaseWithFencing(3, owner2, 30000);
+        expect(acq2.success).toBe(true);
+        expect(acq2.fencingToken).toBeGreaterThan(acq1.fencingToken);
+
+        // Old owner check must fail
+        const oldValid = await checkLeaseOwnership(3, owner1, acq1.fencingToken);
+        expect(oldValid).toBe(false);
+
+        await releaseIdbLease(3, owner2);
+      });
+
+      it('detects lease loss during delayed recovery callback via checkpoint.assertOwnership()', async () => {
+        let callbackExecuted = false;
+        let caughtError: any = null;
+
+        await withRecoveryLock(4, async (checkpoint) => {
+          callbackExecuted = true;
+          await checkpoint.assertOwnership(); // Checkpoint 1 passes
+
+          // Force-expire the lease behind the scenes by having a new owner take it
+          const db = await new Promise<IDBDatabase>((res, rej) => {
+            const req = indexedDB.open('oir_hub_coordination', 2);
+            req.onsuccess = () => res(req.result);
+            req.onerror = () => rej(req.error);
+          });
+          await new Promise<void>((res, rej) => {
+            const tx = db.transaction('leases', 'readwrite');
+            tx.objectStore('leases').put({
+              key: 'set_4',
+              setNumber: 4,
+              ownerId: 'rival_owner',
+              fencingToken: checkpoint.fencingToken + 1,
+              expiresAt: Date.now() + 30000,
+            });
+            tx.oncomplete = () => {
+              db.close();
+              res();
+            };
+            tx.onerror = () => {
+              db.close();
+              rej();
+            };
+          });
+
+          // Subsequent checkpoint MUST detect loss and throw error
+          try {
+            await checkpoint.assertOwnership();
+          } catch (err) {
+            caughtError = err;
+            throw err;
+          }
+        });
+
+        expect(callbackExecuted).toBe(true);
+        expect(caughtError).not.toBeNull();
+        expect(caughtError?.message).toBe('RECOVERY_OWNERSHIP_LOST');
+
+        await releaseIdbLease(4, 'rival_owner');
+      });
+    });
+
+    // ------------------------------------------------------------------------
+    // SECTION 5: Strict Canonical Deep-State Equality
+    // ------------------------------------------------------------------------
+    describe('Section 5: Strict Canonical Deep Equality (strictDeepEqual)', () => {
+      it('distinguishes missing property from explicitly false or undefined', () => {
+        expect(strictDeepEqual({ a: 1 }, { a: 1, b: undefined })).toBe(false);
+        expect(strictDeepEqual({ isCorrect: false }, {})).toBe(false);
+        expect(strictDeepEqual({ isExcluded: false }, {})).toBe(false);
+      });
+
+      it('distinguishes missing property from zero or empty string', () => {
+        expect(strictDeepEqual({ timeSpentSeconds: 0 }, {})).toBe(false);
+        expect(strictDeepEqual({ val: '' }, {})).toBe(false);
+      });
+
+      it('distinguishes number from numeric string and null from undefined', () => {
+        expect(strictDeepEqual(42, '42')).toBe(false);
+        expect(strictDeepEqual(null, undefined)).toBe(false);
+        expect(strictDeepEqual([1, 2], ['1', '2'])).toBe(false);
+      });
+
+      it('distinguishes array ordering differences', () => {
+        expect(strictDeepEqual(['A', 'B'], ['B', 'A'])).toBe(false);
+        expect(strictDeepEqual([1, 2, 3], [1, 3, 2])).toBe(false);
+      });
+
+      it('verifies exact clone of complete ActiveExamState returns true', () => {
+        const now = Date.now();
+        const fullState: ActiveExamState = {
+          setNumber: 1,
+          currentQuestionIndex: 25,
+          userAnswers: {
+            1: { questionNumber: 1, selectedOption: '1', isAnswered: true, isCorrect: true, timeSpentSeconds: 12 },
+            2: { questionNumber: 2, twoPartAnswer: ['4', '9'], isAnswered: true, timeSpentSeconds: 24 },
+          },
+          examStartTime: now - 15000,
+          examEndTime: now + 15000,
+          questionTimeLeft: { 25: 18 },
+          currentQuestionStartedAt: now - 2000,
+          questionExpiredMap: { 1: true, 2: false },
+          isPaused: false,
+          sessionId: 'sess_strict_full',
+        };
+
+        const clone = JSON.parse(JSON.stringify(fullState));
+        expect(strictDeepEqual(fullState, clone)).toBe(true);
+        expect(isStateDeepEqual(fullState, clone)).toBe(true);
+      });
+    });
+
+    // ------------------------------------------------------------------------
+    // SECTION 6: Storage Envelope Validation Boundary Cases
+    // ------------------------------------------------------------------------
+    describe('Section 6: Envelope Validation & Boundary Testing', () => {
+      it('rejects fractional, negative, zero, or non-finite revisions', () => {
+        const validBase = {
+          setNumber: 1,
+          updatedAt: Date.now(),
+          sessionId: 'sess_env_test',
+          storageVersion: 1,
+          isDeleted: true,
+        };
+
+        expect(validateStorageEnvelope({ ...validBase, revision: 1.5 })).toBeNull();
+        expect(validateStorageEnvelope({ ...validBase, revision: -1 })).toBeNull();
+        expect(validateStorageEnvelope({ ...validBase, revision: 0 })).toBeNull();
+        expect(validateStorageEnvelope({ ...validBase, revision: NaN })).toBeNull();
+        expect(validateStorageEnvelope({ ...validBase, revision: Infinity })).toBeNull();
+      });
+
+      it('rejects invalid set numbers (<1 or >20)', () => {
+        const validBase = {
+          revision: 1,
+          updatedAt: Date.now(),
+          sessionId: 'sess_env_test',
+          storageVersion: 1,
+          isDeleted: true,
+        };
+
+        expect(validateStorageEnvelope({ ...validBase, setNumber: 0 })).toBeNull();
+        expect(validateStorageEnvelope({ ...validBase, setNumber: 21 })).toBeNull();
+        expect(validateStorageEnvelope({ ...validBase, setNumber: -5 })).toBeNull();
+      });
+
+      it('rejects mismatched envelope and state setNumber', () => {
+        const now = Date.now();
+        const invalidEnvelope = {
+          setNumber: 1,
+          revision: 1,
+          updatedAt: now,
+          sessionId: 'sess_env_mismatch',
+          storageVersion: 1,
+          isDeleted: false,
+          state: {
+            setNumber: 2, // Mismatch!
+            currentQuestionIndex: 0,
+            userAnswers: {},
+            examStartTime: now,
+            examEndTime: now + 10000,
+          },
+        };
+
+        expect(validateStorageEnvelope(invalidEnvelope)).toBeNull();
+      });
+
+      it('rejects unsupported schema versions', () => {
+        const invalidEnvelope = {
+          setNumber: 1,
+          revision: 1,
+          updatedAt: Date.now(),
+          sessionId: 'sess_env_v2',
+          storageVersion: 2, // Unsupported!
+          isDeleted: true,
+        };
+
+        expect(validateStorageEnvelope(invalidEnvelope)).toBeNull();
+      });
+
+      it('rejects active records missing state and tombstones carrying state', () => {
+        const now = Date.now();
+        // Active record without state
+        expect(validateStorageEnvelope({
+          setNumber: 1,
+          revision: 1,
+          updatedAt: now,
+          sessionId: 'sess_no_state',
+          storageVersion: 1,
+          isDeleted: false,
+        })).toBeNull();
+
+        // Tombstone carrying state
+        expect(validateStorageEnvelope({
+          setNumber: 1,
+          revision: 1,
+          updatedAt: now,
+          sessionId: 'sess_tomb_with_state',
+          storageVersion: 1,
+          isDeleted: true,
+          state: { setNumber: 1 },
+        })).toBeNull();
+      });
+
+      it('rejects malformed answer maps with questionNumber mismatch or non-boolean isAnswered', () => {
+        const now = Date.now();
+        const baseEnv = {
+          setNumber: 1,
+          revision: 1,
+          updatedAt: now,
+          sessionId: 'sess_bad_answers',
+          storageVersion: 1,
+          isDeleted: false,
+        };
+
+        // QuestionNumber mismatch
+        expect(validateStorageEnvelope({
+          ...baseEnv,
+          state: {
+            setNumber: 1,
+            currentQuestionIndex: 0,
+            userAnswers: { 1: { questionNumber: 2, isAnswered: true } },
+            examStartTime: now,
+            examEndTime: now + 10000,
+          },
+        })).toBeNull();
+
+        // Non-boolean isAnswered
+        expect(validateStorageEnvelope({
+          ...baseEnv,
+          state: {
+            setNumber: 1,
+            currentQuestionIndex: 0,
+            userAnswers: { 1: { questionNumber: 1, isAnswered: 'yes' } },
+            examStartTime: now,
+            examEndTime: now + 10000,
+          },
+        })).toBeNull();
+      });
+
+      it('safely migrates unversioned legacy records and prevents versioned envelopes from legacy path', () => {
+        const now = Date.now();
+        const legacyState = {
+          setNumber: 5,
+          currentQuestionIndex: 3,
+          userAnswers: { 1: { questionNumber: 1, isAnswered: true } },
+          examStartTime: now - 5000,
+          examEndTime: now + 10000,
+        };
+
+        const migrated = migrateLegacyActiveExam(legacyState);
+        expect(migrated).not.toBeNull();
+        expect(migrated?.storageVersion).toBe(1);
+        expect(migrated?.revision).toBe(1);
+        expect(migrated?.isDeleted).toBe(false);
+
+        // A versioned record must NOT enter legacy migration
+        expect(migrateLegacyActiveExam({ ...legacyState, storageVersion: 1 })).toBeNull();
+        expect(migrateLegacyActiveExam({ ...legacyState, revision: 2 })).toBeNull();
+      });
+    });
+
+    // ------------------------------------------------------------------------
+    // SECTION 7: Cross-Tab Cache Invalidation & Quarantine Hydration
+    // ------------------------------------------------------------------------
+    describe('Section 7: Cross-Tab Cache Invalidation & Quarantine Hydration', () => {
+      it('quarantines set during hydration preventing stale reads from getActiveExamSync', async () => {
+        const now = Date.now();
+        const state: ActiveExamState = {
+          setNumber: 12,
+          currentQuestionIndex: 5,
+          userAnswers: {},
+          examStartTime: now,
+          examEndTime: now + 10000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now,
+          questionExpiredMap: {},
+          sessionId: 'sess_quarantine_12',
+        };
+
+        await saveActiveExam(state);
+        expect(getActiveExamSync(12)).not.toBeNull();
+
+        // Quarantine set 12 for external hydration
+        quarantineSetForHydration(12);
+        expect(isSetQuarantined(12)).toBe(true);
+
+        // getActiveExamSync returns null while quarantined even if localStorage has data
+        expect(getActiveExamSync(12)).toBeNull();
+
+        // Authoritative getActiveExam releases quarantine
+        const hydrated = await getActiveExam(12);
+        expect(hydrated).not.toBeNull();
+        expect(isSetQuarantined(12)).toBe(false);
+        expect(getActiveExamSync(12)).not.toBeNull();
+      });
+
+      it('quarantine of one set does not affect or interrupt active exam on another set', async () => {
+        const now = Date.now();
+        const stateA: ActiveExamState = {
+          setNumber: 6,
+          currentQuestionIndex: 1,
+          userAnswers: {},
+          examStartTime: now,
+          examEndTime: now + 10000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now,
+          questionExpiredMap: {},
+          sessionId: 'sess_set6',
+        };
+        const stateB: ActiveExamState = {
+          setNumber: 7,
+          currentQuestionIndex: 2,
+          userAnswers: {},
+          examStartTime: now,
+          examEndTime: now + 10000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now,
+          questionExpiredMap: {},
+          sessionId: 'sess_set7',
+        };
+
+        await saveActiveExam(stateA);
+        await saveActiveExam(stateB);
+
+        // Quarantine set 6 only
+        quarantineSetForHydration(6);
+
+        expect(getActiveExamSync(6)).toBeNull();
+        expect(getActiveExamSync(7)).not.toBeNull();
+        expect(getActiveExamSync(7)?.currentQuestionIndex).toBe(2);
+
+        await getActiveExam(6);
+        expect(getActiveExamSync(6)).not.toBeNull();
+      });
     });
   });
 });

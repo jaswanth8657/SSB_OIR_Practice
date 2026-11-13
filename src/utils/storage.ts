@@ -9,6 +9,8 @@ import {
   ActiveExamSaveResult,
   RecoveryBroadcastMessage,
   VersionedActiveExamRecord,
+  ClearActiveExamResult,
+  RecoveryCheckpoint,
 } from '../types/oir';
 import { buildTestAttempt } from './scoring';
 
@@ -442,10 +444,26 @@ export function getOverallStats(): OverallStats {
 // In-memory cache for active exams, storing versioned envelopes
 const memoryActiveExams = new Map<number, VersionedActiveExamRecord>();
 
-// Per-set write serialization queue to eliminate async write race conditions
+// Quarantined sets currently awaiting authoritative asynchronous hydration
+const quarantinedSets = new Set<number>();
+
+export function quarantineSetForHydration(setNumber: number): void {
+  quarantinedSets.add(setNumber);
+  memoryActiveExams.delete(setNumber);
+}
+
+export function isSetQuarantined(setNumber: number): boolean {
+  return quarantinedSets.has(setNumber);
+}
+
+export function releaseSetQuarantine(setNumber: number): void {
+  quarantinedSets.delete(setNumber);
+}
+
+// Per-set write serialization queue to eliminate async write race conditions in this context
 const writeQueues = new Map<number, Promise<any>>();
 
-function queueWrite<T>(setNumber: number, task: () => Promise<T>): Promise<T> {
+export function queueWrite<T>(setNumber: number, task: () => Promise<T>): Promise<T> {
   const current = writeQueues.get(setNumber) || Promise.resolve();
   const next = current.then(task, task);
   writeQueues.set(setNumber, next);
@@ -488,152 +506,241 @@ function openCoordinationDb(): Promise<IDBDatabase> {
 }
 
 /**
- * Deep equality check comparing all critical examination fields:
- * setNumber, currentQuestionIndex, userAnswers (questionNumber, selectedOption,
- * twoPartAnswer, dropdownSelection, isAnswered, isCorrect, isExcluded, timeSpentSeconds),
- * questionTimeLeft, currentQuestionStartedAt, questionExpiredMap, examStartTime,
- * examEndTime, isPaused.
+ * Strict canonical deep equality comparison without coercion.
+ * Distinguishes missing properties from explicit undefined/false/null/0,
+ * respects exact type matches, array ordering, and key presence.
+ */
+export function strictDeepEqual(a: any, b: any): boolean {
+  if (a === b) {
+    return true;
+  }
+  // Check if both are NaN
+  if (typeof a === 'number' && typeof b === 'number' && Number.isNaN(a) && Number.isNaN(b)) {
+    return true;
+  }
+
+  // Type mismatch
+  if (typeof a !== typeof b) {
+    return false;
+  }
+
+  // If either is null or undefined (and not identical via ===)
+  if (a === null || b === null || a === undefined || b === undefined) {
+    return false;
+  }
+
+  // Array comparison
+  const aIsArr = Array.isArray(a);
+  const bIsArr = Array.isArray(b);
+  if (aIsArr || bIsArr) {
+    if (!aIsArr || !bIsArr) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!strictDeepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
+  // Object comparison
+  if (typeof a === 'object' && typeof b === 'object') {
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+
+    for (const key of keysA) {
+      if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+      if (!strictDeepEqual(a[key], b[key])) return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Canonical deep equality check for ActiveExamState without coercion.
  */
 export function isStateDeepEqual(a: ActiveExamState, b: ActiveExamState): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  if (a.setNumber !== b.setNumber) return false;
-  if (a.currentQuestionIndex !== b.currentQuestionIndex) return false;
-  if (a.currentQuestionStartedAt !== b.currentQuestionStartedAt) return false;
-  if (a.examStartTime !== b.examStartTime) return false;
-  if (a.examEndTime !== b.examEndTime) return false;
-  if (Boolean(a.isPaused) !== Boolean(b.isPaused)) return false;
-
-  // Compare questionTimeLeft: either number or Record<number, number>
-  if (typeof a.questionTimeLeft === 'number' || typeof b.questionTimeLeft === 'number') {
-    if (a.questionTimeLeft !== b.questionTimeLeft) return false;
-  } else {
-    const qtlA = (a.questionTimeLeft || {}) as Record<string, number>;
-    const qtlB = (b.questionTimeLeft || {}) as Record<string, number>;
-    const qtlKeysA = Object.keys(qtlA);
-    const qtlKeysB = Object.keys(qtlB);
-    if (qtlKeysA.length !== qtlKeysB.length) return false;
-    for (const k of qtlKeysA) {
-      if (Number(qtlA[k]) !== Number(qtlB[k])) return false;
-    }
-  }
-
-  // Compare questionExpiredMap
-  const expA = a.questionExpiredMap || {};
-  const expB = b.questionExpiredMap || {};
-  const expKeysA = Object.keys(expA);
-  const expKeysB = Object.keys(expB);
-  if (expKeysA.length !== expKeysB.length) return false;
-  for (const k of expKeysA) {
-    if (Boolean(expA[Number(k)]) !== Boolean(expB[Number(k)])) return false;
-  }
-
-  // Compare userAnswers
-  const ansA = a.userAnswers || {};
-  const ansB = b.userAnswers || {};
-  const keysA = Object.keys(ansA);
-  const keysB = Object.keys(ansB);
-  if (keysA.length !== keysB.length) return false;
-  for (const k of keysA) {
-    const ua = ansA[Number(k)];
-    const ub = ansB[Number(k)];
-    if (!ua || !ub) return false;
-    if (ua.questionNumber !== ub.questionNumber) return false;
-    if (ua.isAnswered !== ub.isAnswered) return false;
-    if (Boolean(ua.isCorrect) !== Boolean(ub.isCorrect)) return false;
-    if (Boolean(ua.isExcluded) !== Boolean(ub.isExcluded)) return false;
-    if (Number(ua.timeSpentSeconds || 0) !== Number(ub.timeSpentSeconds || 0)) return false;
-
-    // selectedOption: string | string[]
-    if (Array.isArray(ua.selectedOption) || Array.isArray(ub.selectedOption)) {
-      if (!Array.isArray(ua.selectedOption) || !Array.isArray(ub.selectedOption)) return false;
-      if (ua.selectedOption.length !== ub.selectedOption.length) return false;
-      for (let i = 0; i < ua.selectedOption.length; i++) {
-        if (ua.selectedOption[i] !== ub.selectedOption[i]) return false;
-      }
-    } else {
-      if (ua.selectedOption !== ub.selectedOption) return false;
-    }
-
-    // twoPartAnswer
-    if (Boolean(ua.twoPartAnswer) !== Boolean(ub.twoPartAnswer)) return false;
-    if (ua.twoPartAnswer && ub.twoPartAnswer) {
-      if (
-        ua.twoPartAnswer[0] !== ub.twoPartAnswer[0] ||
-        ua.twoPartAnswer[1] !== ub.twoPartAnswer[1]
-      ) {
-        return false;
-      }
-    }
-
-    // dropdownSelection: string[] or object
-    if (Boolean(ua.dropdownSelection) !== Boolean(ub.dropdownSelection)) return false;
-    if (ua.dropdownSelection && ub.dropdownSelection) {
-      if (Array.isArray(ua.dropdownSelection) || Array.isArray(ub.dropdownSelection)) {
-        if (!Array.isArray(ua.dropdownSelection) || !Array.isArray(ub.dropdownSelection)) return false;
-        if (ua.dropdownSelection.length !== ub.dropdownSelection.length) return false;
-        for (let i = 0; i < ua.dropdownSelection.length; i++) {
-          if (ua.dropdownSelection[i] !== ub.dropdownSelection[i]) return false;
-        }
-      } else {
-        const dropA = ua.dropdownSelection as any;
-        const dropB = ub.dropdownSelection as any;
-        const dropKeysA = Object.keys(dropA);
-        const dropKeysB = Object.keys(dropB);
-        if (dropKeysA.length !== dropKeysB.length) return false;
-        for (const dk of dropKeysA) {
-          if (dropA[dk] !== dropB[dk]) return false;
-        }
-      }
-    }
-  }
-
-  return true;
+  return strictDeepEqual(a, b);
 }
 
 /**
- * Read versioned envelope from localStorage with legacy migration support.
+ * Shared storage envelope validator.
+ * Rejects corrupt, partial, or malformed records.
  */
-function readLocalActiveExamEnvelope(setNumber: number): VersionedActiveExamRecord | null {
+export function validateStorageEnvelope(raw: unknown): VersionedActiveExamRecord | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, any>;
+
+  // Schema version must be 1
+  if (obj.storageVersion !== 1) return null;
+
+  // setNumber must be an integer 1..20
+  if (!Number.isInteger(obj.setNumber) || obj.setNumber < 1 || obj.setNumber > 20) return null;
+
+  // revision must be a positive integer
+  if (!Number.isInteger(obj.revision) || obj.revision <= 0) return null;
+
+  // updatedAt must be finite positive timestamp
+  if (typeof obj.updatedAt !== 'number' || !Number.isFinite(obj.updatedAt) || obj.updatedAt <= 0) return null;
+
+  // isDeleted: boolean if present, defaults to false for active v1 records
+  if (obj.isDeleted !== undefined && typeof obj.isDeleted !== 'boolean') return null;
+  const isDeleted = obj.isDeleted === true;
+
+  // sessionId: non-empty string, or fallback generated session id for legacy records
+  const sessionId =
+    typeof obj.sessionId === 'string' && obj.sessionId.trim()
+      ? obj.sessionId
+      : `sess_${obj.setNumber}_${obj.updatedAt || Date.now()}`;
+
+  // Tombstone envelope
+  if (isDeleted) {
+    // Tombstones must not carry an active state object
+    if (obj.state !== undefined && obj.state !== null) return null;
+    return {
+      setNumber: obj.setNumber,
+      revision: obj.revision,
+      updatedAt: obj.updatedAt,
+      sessionId,
+      storageVersion: 1,
+      isDeleted: true,
+      state: undefined,
+    };
+  }
+
+  // Active record: state must exist
+  const state = obj.state;
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return null;
+
+  // state.setNumber must match envelope.setNumber
+  if (state.setNumber !== obj.setNumber) return null;
+
+  // state.currentQuestionIndex must be integer 0..49
+  if (!Number.isInteger(state.currentQuestionIndex) || state.currentQuestionIndex < 0 || state.currentQuestionIndex > 49) return null;
+
+  // Timestamps must be finite numbers > 0
+  if (typeof state.examStartTime !== 'number' || !Number.isFinite(state.examStartTime) || state.examStartTime <= 0) return null;
+  if (typeof state.examEndTime !== 'number' || !Number.isFinite(state.examEndTime) || state.examEndTime <= 0) return null;
+
+  // userAnswers must be an object
+  if (!state.userAnswers || typeof state.userAnswers !== 'object' || Array.isArray(state.userAnswers)) return null;
+  for (const [k, ans] of Object.entries(state.userAnswers)) {
+    const qNum = Number(k);
+    if (!Number.isInteger(qNum) || qNum < 1 || qNum > 50) return null;
+    if (!ans || typeof ans !== 'object' || Array.isArray(ans)) return null;
+    const ansObj = ans as Record<string, any>;
+    if (ansObj.questionNumber !== qNum) return null;
+    if (typeof ansObj.isAnswered !== 'boolean') return null;
+  }
+
+  // questionExpiredMap
+  if (state.questionExpiredMap !== undefined) {
+    if (typeof state.questionExpiredMap !== 'object' || Array.isArray(state.questionExpiredMap)) return null;
+    for (const [k, v] of Object.entries(state.questionExpiredMap)) {
+      const qNum = Number(k);
+      if (!Number.isInteger(qNum) || qNum < 1 || qNum > 50) return null;
+      if (typeof v !== 'boolean') return null;
+    }
+  }
+
+  // questionTimeLeft
+  if (state.questionTimeLeft !== undefined) {
+    if (typeof state.questionTimeLeft === 'number') {
+      if (!Number.isFinite(state.questionTimeLeft)) return null;
+    } else if (typeof state.questionTimeLeft === 'object' && !Array.isArray(state.questionTimeLeft)) {
+      for (const [k, v] of Object.entries(state.questionTimeLeft)) {
+        const qNum = Number(k);
+        if (!Number.isInteger(qNum) || qNum < 1 || qNum > 50) return null;
+        if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+      }
+    } else {
+      return null;
+    }
+  }
+
+  return {
+    setNumber: obj.setNumber,
+    revision: obj.revision,
+    updatedAt: obj.updatedAt,
+    sessionId,
+    storageVersion: 1,
+    isDeleted: false,
+    state,
+  };
+}
+
+/**
+ * Explicit, safe migration for legacy unversioned active exam records.
+ * Never allows a corrupted versioned envelope to accidentally enter legacy migration.
+ */
+export function migrateLegacyActiveExam(raw: unknown): VersionedActiveExamRecord | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, any>;
+
+  // A versioned envelope (or corrupted attempt at one) must never enter legacy migration
+  if ('storageVersion' in obj || 'revision' in obj || 'isDeleted' in obj) return null;
+
+  // Must be a valid legacy ActiveExamState
+  if (!Number.isInteger(obj.setNumber) || obj.setNumber < 1 || obj.setNumber > 20) return null;
+  if (!Number.isInteger(obj.currentQuestionIndex) || obj.currentQuestionIndex < 0 || obj.currentQuestionIndex > 49) return null;
+  if (!obj.userAnswers || typeof obj.userAnswers !== 'object' || Array.isArray(obj.userAnswers)) return null;
+
+  const sessionId = `sess_${obj.setNumber}_${obj.examStartTime || Date.now()}_legacy`;
+  return {
+    setNumber: obj.setNumber,
+    revision: 1,
+    updatedAt: obj.currentQuestionStartedAt || obj.examStartTime || Date.now(),
+    sessionId,
+    storageVersion: 1,
+    isDeleted: false,
+    state: obj as ActiveExamState,
+  };
+}
+
+/**
+ * Validates envelope or applies safe legacy migration.
+ */
+export function parseEnvelopeOrMigrate(raw: unknown): VersionedActiveExamRecord | null {
+  const validated = validateStorageEnvelope(raw);
+  if (validated) return validated;
+  return migrateLegacyActiveExam(raw);
+}
+
+/**
+ * Read versioned envelope from localStorage with validation and legacy migration.
+ */
+export function readLocalActiveExamEnvelope(setNumber: number): VersionedActiveExamRecord | null {
   try {
     const raw = localStorage.getItem(`${ACTIVE_EXAM_PREFIX}${setNumber}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed) return null;
-
-    if (typeof parsed.revision === 'number' && (parsed.state || parsed.isDeleted)) {
-      return parsed as VersionedActiveExamRecord;
-    }
-    // Legacy migration
-    if (typeof parsed.setNumber === 'number' && parsed.userAnswers) {
-      return {
-        setNumber: parsed.setNumber,
-        revision: 1,
-        updatedAt: parsed.currentQuestionStartedAt || parsed.examStartTime || Date.now(),
-        state: parsed as ActiveExamState,
-        storageVersion: 1,
-        isDeleted: false,
-      };
-    }
+    return parseEnvelopeOrMigrate(parsed);
   } catch {
     return null;
   }
-  return null;
 }
 
 /**
  * Write versioned envelope to localStorage with read-back verification.
  */
-function writeLocalActiveExamEnvelope(envelope: VersionedActiveExamRecord): boolean {
+export function writeLocalActiveExamEnvelope(envelope: VersionedActiveExamRecord): boolean {
   try {
     const key = `${ACTIVE_EXAM_PREFIX}${envelope.setNumber}`;
     localStorage.setItem(key, JSON.stringify(envelope));
-    const readBack = localStorage.getItem(key);
-    if (!readBack) return false;
-    const parsed = JSON.parse(readBack);
-    if (!parsed || parsed.revision !== envelope.revision) return false;
-    if (envelope.isDeleted) return parsed.isDeleted === true;
-    return isStateDeepEqual(parsed.state, envelope.state);
+    const readBackRaw = localStorage.getItem(key);
+    if (!readBackRaw) return false;
+    const parsed = JSON.parse(readBackRaw);
+    const readBack = validateStorageEnvelope(parsed);
+    if (!readBack || readBack.revision !== envelope.revision || readBack.sessionId !== envelope.sessionId) {
+      return false;
+    }
+    if (envelope.isDeleted) {
+      return readBack.isDeleted === true;
+    }
+    return Boolean(readBack.state && envelope.state && isStateDeepEqual(readBack.state, envelope.state));
   } catch {
     return false;
   }
@@ -642,7 +749,7 @@ function writeLocalActiveExamEnvelope(envelope: VersionedActiveExamRecord): bool
 /**
  * Read versioned envelope from IndexedDB.
  */
-function readIdbActiveExamEnvelope(setNumber: number): Promise<VersionedActiveExamRecord | null> {
+export function readIdbActiveExamEnvelope(setNumber: number): Promise<VersionedActiveExamRecord | null> {
   return new Promise(async (resolve) => {
     try {
       const db = await openCoordinationDb();
@@ -650,25 +757,8 @@ function readIdbActiveExamEnvelope(setNumber: number): Promise<VersionedActiveEx
       const store = tx.objectStore(IDB_STORE_ACTIVE_EXAMS);
       const req = store.get(setNumber);
       req.onsuccess = () => {
-        const res = req.result;
-        if (!res) {
-          resolve(null);
-          return;
-        }
-        if (typeof res.revision === 'number' && (res.state || res.isDeleted)) {
-          resolve(res as VersionedActiveExamRecord);
-        } else if (res.state && typeof res.state.setNumber === 'number') {
-          resolve({
-            setNumber: res.state.setNumber,
-            revision: 1,
-            updatedAt: res.updatedAt || Date.now(),
-            state: res.state,
-            storageVersion: 1,
-            isDeleted: false,
-          });
-        } else {
-          resolve(null);
-        }
+        const validated = parseEnvelopeOrMigrate(req.result);
+        resolve(validated);
       };
       req.onerror = () => resolve(null);
       tx.oncomplete = () => db.close();
@@ -687,69 +777,6 @@ function readIdbActiveExamEnvelope(setNumber: number): Promise<VersionedActiveEx
 }
 
 /**
- * Save versioned envelope to IndexedDB.
- */
-function saveActiveExamEnvelopeToIdb(envelope: VersionedActiveExamRecord): Promise<boolean> {
-  return new Promise(async (resolve) => {
-    try {
-      const db = await openCoordinationDb();
-      let putSuccess = false;
-      const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
-      const store = tx.objectStore(IDB_STORE_ACTIVE_EXAMS);
-      const req = store.put(envelope);
-      req.onsuccess = () => {
-        putSuccess = true;
-      };
-      req.onerror = () => {
-        putSuccess = false;
-      };
-      tx.oncomplete = () => {
-        db.close();
-        resolve(putSuccess);
-      };
-      tx.onerror = () => {
-        db.close();
-        resolve(false);
-      };
-      tx.onabort = () => {
-        db.close();
-        resolve(false);
-      };
-    } catch {
-      resolve(false);
-    }
-  });
-}
-
-/**
- * Remove active examination state from IndexedDB.
- */
-function clearActiveExamFromIdb(setNumber: number): Promise<void> {
-  return new Promise(async (resolve) => {
-    try {
-      const db = await openCoordinationDb();
-      const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
-      const store = tx.objectStore(IDB_STORE_ACTIVE_EXAMS);
-      store.delete(setNumber);
-      tx.oncomplete = () => {
-        db.close();
-        resolve();
-      };
-      tx.onerror = () => {
-        db.close();
-        resolve();
-      };
-      tx.onabort = () => {
-        db.close();
-        resolve();
-      };
-    } catch {
-      resolve();
-    }
-  });
-}
-
-/**
  * Invalidate in-memory cache for a specific set number.
  */
 export function invalidateActiveExamCache(setNumber: number): void {
@@ -758,25 +785,29 @@ export function invalidateActiveExamCache(setNumber: number): void {
 
 /**
  * Synchronous check for active examination from hydrated memory cache or valid localStorage envelope.
+ * Returns null if the set is quarantined for hydration or marked deleted.
  */
 export function getActiveExamSync(setNumber: number): ActiveExamState | null {
+  if (quarantinedSets.has(setNumber)) {
+    return null;
+  }
   const cached = memoryActiveExams.get(setNumber);
   if (cached) {
     if (cached.isDeleted) return null;
-    return cached.state;
+    return cached.state || null;
   }
   const localEnv = readLocalActiveExamEnvelope(setNumber);
   if (localEnv) {
     if (localEnv.isDeleted) return null;
     memoryActiveExams.set(setNumber, localEnv);
-    return localEnv.state;
+    return localEnv.state || null;
   }
   return null;
 }
 
 /**
  * Asynchronously retrieve active examination state with dual-store revision comparison
- * and automatic stale storage repair.
+ * and automatic stale storage repair. Releases quarantine upon completion.
  */
 export async function getActiveExam(setNumber: number): Promise<ActiveExamState | null> {
   const localEnv = readLocalActiveExamEnvelope(setNumber);
@@ -791,16 +822,34 @@ export async function getActiveExam(setNumber: number): Promise<ActiveExamState 
       writeLocalActiveExamEnvelope(idbEnv);
     } else if (localEnv.revision > idbEnv.revision) {
       winner = localEnv;
-      // Stale IDB detected: repair with newer local record
-      saveActiveExamEnvelopeToIdb(localEnv).catch(() => {});
+      // Stale IDB detected: repair with newer local record inside IDB transaction
+      if (typeof indexedDB !== 'undefined') {
+        try {
+          const db = await openCoordinationDb();
+          const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
+          tx.objectStore(IDB_STORE_ACTIVE_EXAMS).put(localEnv);
+          tx.oncomplete = () => db.close();
+        } catch {
+          // Ignore background repair failure
+        }
+      }
     } else {
       // Revisions are equal, tiebreak with updatedAt
-      if (idbEnv.updatedAt > localEnv.updatedAt) {
+      if (idbEnv.updatedAt >= localEnv.updatedAt) {
         winner = idbEnv;
         writeLocalActiveExamEnvelope(idbEnv);
       } else {
         winner = localEnv;
-        saveActiveExamEnvelopeToIdb(localEnv).catch(() => {});
+        if (typeof indexedDB !== 'undefined') {
+          try {
+            const db = await openCoordinationDb();
+            const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
+            tx.objectStore(IDB_STORE_ACTIVE_EXAMS).put(localEnv);
+            tx.oncomplete = () => db.close();
+          } catch {
+            // Ignore
+          }
+        }
       }
     }
   } else if (idbEnv) {
@@ -808,16 +857,32 @@ export async function getActiveExam(setNumber: number): Promise<ActiveExamState 
     writeLocalActiveExamEnvelope(idbEnv);
   } else if (localEnv) {
     winner = localEnv;
-    saveActiveExamEnvelopeToIdb(localEnv).catch(() => {});
+    if (typeof indexedDB !== 'undefined') {
+      try {
+        const db = await openCoordinationDb();
+        const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
+        tx.objectStore(IDB_STORE_ACTIVE_EXAMS).put(localEnv);
+        tx.oncomplete = () => db.close();
+      } catch {
+        // Ignore
+      }
+    }
   }
 
+  // Release any quarantine for this set
+  releaseSetQuarantine(setNumber);
+
   if (!winner || winner.isDeleted) {
-    memoryActiveExams.delete(setNumber);
+    if (winner) {
+      memoryActiveExams.set(setNumber, winner);
+    } else {
+      memoryActiveExams.delete(setNumber);
+    }
     return null;
   }
 
   memoryActiveExams.set(setNumber, winner);
-  return winner.state;
+  return winner.state || null;
 }
 
 /**
@@ -832,103 +897,302 @@ export async function hydrateActiveExamCache(): Promise<void> {
 }
 
 /**
- * Save active examination state with serialized queue, monotonically increasing revision,
- * deep state verification, and dual-store fallback.
+ * Save active examination state with state snapshotting, in-transaction revision allocation,
+ * verified persistence, and stale-session resurrection protection.
  */
 export async function saveActiveExam(state: ActiveExamState): Promise<ActiveExamSaveResult> {
-  // Determine monotonically increasing revision immediately
-  let currentRev = 0;
-  const cached = memoryActiveExams.get(state.setNumber);
-  if (cached && typeof cached.revision === 'number') {
-    currentRev = Math.max(currentRev, cached.revision);
-  }
-  const local = readLocalActiveExamEnvelope(state.setNumber);
-  if (local && typeof local.revision === 'number') {
-    currentRev = Math.max(currentRev, local.revision);
-  }
+  // 1. Snapshot supplied state immediately to prevent caller mutations during persistence
+  const stateSnapshot: ActiveExamState = JSON.parse(JSON.stringify(state));
+  const sessionId = stateSnapshot.sessionId || `sess_${stateSnapshot.setNumber}_${stateSnapshot.examStartTime || Date.now()}`;
+  stateSnapshot.sessionId = sessionId;
 
-  const nextRev = currentRev + 1;
-  const envelope: VersionedActiveExamRecord = {
-    setNumber: state.setNumber,
-    revision: nextRev,
-    updatedAt: Date.now(),
-    state,
-    storageVersion: 1,
-    isDeleted: false,
-  };
+  return queueWrite(stateSnapshot.setNumber, async () => {
+    // 2. Primary authoritative write: IndexedDB readwrite transaction
+    if (typeof indexedDB !== 'undefined') {
+      try {
+        const idbResult = await new Promise<{ success: boolean; envelope?: VersionedActiveExamRecord; error?: string }>(
+          async (resolve) => {
+            try {
+              const db = await openCoordinationDb();
+              const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
+              const store = tx.objectStore(IDB_STORE_ACTIVE_EXAMS);
+              const getReq = store.get(stateSnapshot.setNumber);
 
-  // Immediate synchronous write to memory cache and localStorage so that synchronous
-  // consumers (such as getSetProgress, getActiveExamSync) observe the updated state immediately
-  const localSuccess = writeLocalActiveExamEnvelope(envelope);
-  if (localSuccess) {
-    memoryActiveExams.set(state.setNumber, envelope);
-  }
+              let committedEnvelope: VersionedActiveExamRecord | null = null;
+              let rejectReason: string | null = null;
 
-  return queueWrite(state.setNumber, async () => {
-    if (localSuccess) {
-      // Asynchronously mirror to IndexedDB as durable fallback
-      saveActiveExamEnvelopeToIdb(envelope).catch(() => {});
-      return { success: true, storageType: 'localStorage' as const };
+              getReq.onsuccess = () => {
+                const existing = parseEnvelopeOrMigrate(getReq.result);
+
+                // Stale-session protection:
+                // If a tombstone exists for this exact sessionId, the session has been cleared/recovered
+                if (existing && existing.isDeleted && existing.sessionId === sessionId) {
+                  rejectReason = 'Exam session has been cleared and cannot be resurrected';
+                  return;
+                }
+
+                // Check localStorage replica in case it has a higher revision
+                const localEnv = readLocalActiveExamEnvelope(stateSnapshot.setNumber);
+                let currentMaxRev = existing ? existing.revision : 0;
+                if (localEnv && localEnv.revision > currentMaxRev) {
+                  currentMaxRev = localEnv.revision;
+                }
+
+                const nextRev = currentMaxRev + 1;
+                committedEnvelope = {
+                  setNumber: stateSnapshot.setNumber,
+                  revision: nextRev,
+                  updatedAt: Date.now(),
+                  sessionId,
+                  storageVersion: 1,
+                  isDeleted: false,
+                  state: stateSnapshot,
+                };
+
+                const putReq = store.put(committedEnvelope);
+                putReq.onerror = () => {
+                  rejectReason = putReq.error?.message || 'IndexedDB store put failed';
+                };
+              };
+
+              getReq.onerror = () => {
+                rejectReason = getReq.error?.message || 'IndexedDB store get failed';
+              };
+
+              tx.oncomplete = () => {
+                db.close();
+                if (rejectReason || !committedEnvelope) {
+                  resolve({ success: false, error: rejectReason || 'Transaction completed without commit' });
+                  return;
+                }
+                resolve({ success: true, envelope: committedEnvelope });
+              };
+
+              tx.onerror = () => {
+                db.close();
+                resolve({ success: false, error: tx.error?.message || 'IndexedDB transaction failed' });
+              };
+
+              tx.onabort = () => {
+                db.close();
+                resolve({ success: false, error: 'IndexedDB transaction aborted' });
+              };
+            } catch (err: any) {
+              resolve({ success: false, error: err?.message || 'Failed to open IndexedDB' });
+            }
+          }
+        );
+
+        if (idbResult.success && idbResult.envelope) {
+          // Read-back verification from IndexedDB
+          const readBackIdb = await readIdbActiveExamEnvelope(stateSnapshot.setNumber);
+          if (
+            readBackIdb &&
+            readBackIdb.revision === idbResult.envelope.revision &&
+            readBackIdb.sessionId === idbResult.envelope.sessionId &&
+            !readBackIdb.isDeleted &&
+            readBackIdb.state &&
+            isStateDeepEqual(readBackIdb.state, stateSnapshot)
+          ) {
+            // Mirror to localStorage replica and memory cache
+            writeLocalActiveExamEnvelope(idbResult.envelope);
+            memoryActiveExams.set(stateSnapshot.setNumber, idbResult.envelope);
+            return { success: true, storageType: 'indexedDB' };
+          } else {
+            return { success: false, error: 'IndexedDB read-back verification failed' };
+          }
+        } else if (idbResult.error && idbResult.error.includes('cannot be resurrected')) {
+          return { success: false, error: idbResult.error };
+        }
+      } catch {
+        // Fall through to localStorage fallback
+      }
     }
 
-    // 2. Durable fallback: IndexedDB
+    // 3. Fallback persistence: localStorage
     try {
-      const idbSuccess = await saveActiveExamEnvelopeToIdb(envelope);
-      if (idbSuccess) {
-        // Read-back verification from IDB
-        const readBackIdb = await readIdbActiveExamEnvelope(state.setNumber);
-        if (
-          readBackIdb &&
-          readBackIdb.revision === nextRev &&
-          isStateDeepEqual(readBackIdb.state, state)
-        ) {
-          memoryActiveExams.set(state.setNumber, envelope);
-          return { success: true, storageType: 'indexedDB' as const };
-        }
+      const localExisting = readLocalActiveExamEnvelope(stateSnapshot.setNumber);
+      if (localExisting && localExisting.isDeleted && localExisting.sessionId === sessionId) {
+        return { success: false, error: 'Exam session has been cleared and cannot be resurrected' };
+      }
+
+      const nextRev = (localExisting?.revision || 0) + 1;
+      const envelope: VersionedActiveExamRecord = {
+        setNumber: stateSnapshot.setNumber,
+        revision: nextRev,
+        updatedAt: Date.now(),
+        sessionId,
+        storageVersion: 1,
+        isDeleted: false,
+        state: stateSnapshot,
+      };
+
+      const localSuccess = writeLocalActiveExamEnvelope(envelope);
+      if (localSuccess) {
+        memoryActiveExams.set(stateSnapshot.setNumber, envelope);
+        return { success: true, storageType: 'localStorage' };
       }
     } catch {
-      // IDB failed
+      // Local failed
     }
 
-    // 3. Both failed
     return {
       success: false,
-      error: 'Both localStorage and IndexedDB failed to persist active examination state.',
+      error: 'Both IndexedDB and localStorage failed to persist active examination state.',
     };
   });
 }
 
 /**
- * Safe clear of active exam: evicts memory cache, removes from localStorage,
- * and awaits IndexedDB deletion.
+ * Versioned deletion tombstone protocol for clearing active examinations.
+ * Commits a higher-revision tombstone to prevent stale asynchronous writes or caches
+ * from resurrecting a cleared exam.
  */
-export async function clearActiveExam(setNumber: number): Promise<void> {
+export async function clearActiveExam(setNumber: number): Promise<ClearActiveExamResult> {
   invalidateActiveExamCache(setNumber);
-  try {
-    localStorage.removeItem(`${ACTIVE_EXAM_PREFIX}${setNumber}`);
-    if (typeof sessionStorage !== 'undefined') {
+  if (typeof sessionStorage !== 'undefined') {
+    try {
       sessionStorage.removeItem(`${SUBMISSION_GUARD_KEY}${setNumber}`);
+    } catch {
+      // Ignore
     }
-  } catch {
-    // Ignore storage clear errors in headless environments
   }
-  await clearActiveExamFromIdb(setNumber).catch(() => {});
+
+  return queueWrite(setNumber, async () => {
+    // 1. Authoritative write of deletion tombstone to IndexedDB
+    if (typeof indexedDB !== 'undefined') {
+      try {
+        const idbResult = await new Promise<{ success: boolean; tombstone?: VersionedActiveExamRecord; error?: string }>(
+          async (resolve) => {
+            try {
+              const db = await openCoordinationDb();
+              const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
+              const store = tx.objectStore(IDB_STORE_ACTIVE_EXAMS);
+              const getReq = store.get(setNumber);
+
+              let tombstone: VersionedActiveExamRecord | null = null;
+              let rejectReason: string | null = null;
+
+              getReq.onsuccess = () => {
+                const existing = parseEnvelopeOrMigrate(getReq.result);
+                const localEnv = readLocalActiveExamEnvelope(setNumber);
+
+                let currentMaxRev = existing ? existing.revision : 0;
+                if (localEnv && localEnv.revision > currentMaxRev) {
+                  currentMaxRev = localEnv.revision;
+                }
+
+                const nextRev = currentMaxRev + 1;
+                const sessionId = existing?.sessionId || localEnv?.sessionId || `sess_${setNumber}_tombstone_${Date.now()}`;
+
+                tombstone = {
+                  setNumber,
+                  revision: nextRev,
+                  updatedAt: Date.now(),
+                  sessionId,
+                  storageVersion: 1,
+                  isDeleted: true,
+                  state: undefined,
+                };
+
+                const putReq = store.put(tombstone);
+                putReq.onerror = () => {
+                  rejectReason = putReq.error?.message || 'IndexedDB store put failed';
+                };
+              };
+
+              getReq.onerror = () => {
+                rejectReason = getReq.error?.message || 'IndexedDB store get failed';
+              };
+
+              tx.oncomplete = () => {
+                db.close();
+                if (rejectReason || !tombstone) {
+                  resolve({ success: false, error: rejectReason || 'Transaction completed without commit' });
+                  return;
+                }
+                resolve({ success: true, tombstone });
+              };
+
+              tx.onerror = () => {
+                db.close();
+                resolve({ success: false, error: tx.error?.message || 'IndexedDB transaction failed' });
+              };
+
+              tx.onabort = () => {
+                db.close();
+                resolve({ success: false, error: 'IndexedDB transaction aborted' });
+              };
+            } catch (err: any) {
+              resolve({ success: false, error: err?.message || 'Failed to open IndexedDB' });
+            }
+          }
+        );
+
+        if (idbResult.success && idbResult.tombstone) {
+          // Read-back verification
+          const readBackIdb = await readIdbActiveExamEnvelope(setNumber);
+          if (
+            readBackIdb &&
+            readBackIdb.isDeleted === true &&
+            readBackIdb.revision === idbResult.tombstone.revision
+          ) {
+            writeLocalActiveExamEnvelope(idbResult.tombstone);
+            memoryActiveExams.set(setNumber, idbResult.tombstone);
+            return { success: true, tombstone: idbResult.tombstone };
+          } else {
+            return { success: false, error: 'IndexedDB tombstone read-back verification failed' };
+          }
+        }
+      } catch {
+        // Fall through to localStorage fallback
+      }
+    }
+
+    // 2. Fallback: localStorage deletion tombstone
+    try {
+      const localExisting = readLocalActiveExamEnvelope(setNumber);
+      const nextRev = (localExisting?.revision || 0) + 1;
+      const sessionId = localExisting?.sessionId || `sess_${setNumber}_tombstone_${Date.now()}`;
+
+      const tombstone: VersionedActiveExamRecord = {
+        setNumber,
+        revision: nextRev,
+        updatedAt: Date.now(),
+        sessionId,
+        storageVersion: 1,
+        isDeleted: true,
+        state: undefined,
+      };
+
+      const localSuccess = writeLocalActiveExamEnvelope(tombstone);
+      if (localSuccess) {
+        memoryActiveExams.set(setNumber, tombstone);
+        return { success: true, tombstone };
+      }
+    } catch {
+      // Local failed
+    }
+
+    return { success: false, error: 'Failed to persist deletion tombstone' };
+  });
 }
 
-// ----------------- CROSS-TAB RECOVERY COORDINATION & LEASES -----------------
+// ----------------- CROSS-TAB RECOVERY COORDINATION & FENCED LEASES -----------------
 
 /**
- * Atomically inspects and claims a recovery lease in an IndexedDB readwrite transaction.
+ * Claims a recovery lease with owner ID and monotonically incremented fencing token.
  */
-export async function acquireIdbLease(
+export async function acquireIdbLeaseWithFencing(
   setNumber: number,
   ownerId: string,
   ttlMs = LEASE_TIMEOUT_MS
-): Promise<boolean> {
+): Promise<{ success: boolean; acquired: boolean; fencingToken?: number }> {
   try {
     const db = await openCoordinationDb();
     return new Promise((resolve) => {
       let isAcquired = false;
+      let allocatedToken = 1;
       const tx = db.transaction(IDB_STORE_LEASES, 'readwrite');
       const store = tx.objectStore(IDB_STORE_LEASES);
       const key = `set_${setNumber}`;
@@ -941,7 +1205,8 @@ export async function acquireIdbLease(
           isAcquired = false;
           return;
         }
-        const putReq = store.put({ key, setNumber, ownerId, expiresAt: now + ttlMs });
+        allocatedToken = ((existing && existing.fencingToken) || 0) + 1;
+        const putReq = store.put({ key, setNumber, ownerId, fencingToken: allocatedToken, expiresAt: now + ttlMs });
         putReq.onsuccess = () => {
           isAcquired = true;
         };
@@ -955,29 +1220,39 @@ export async function acquireIdbLease(
 
       tx.oncomplete = () => {
         db.close();
-        resolve(isAcquired);
+        resolve({ success: isAcquired, acquired: isAcquired, fencingToken: isAcquired ? allocatedToken : undefined });
       };
       tx.onerror = () => {
         db.close();
-        resolve(false);
+        resolve({ success: false, acquired: false });
       };
       tx.onabort = () => {
         db.close();
-        resolve(false);
+        resolve({ success: false, acquired: false });
       };
     });
   } catch {
-    return false;
+    return { success: false, acquired: false };
   }
 }
 
+export async function acquireIdbLease(
+  setNumber: number,
+  ownerId: string,
+  ttlMs = LEASE_TIMEOUT_MS
+): Promise<boolean> {
+  const res = await acquireIdbLeaseWithFencing(setNumber, ownerId, ttlMs);
+  return res.acquired;
+}
+
 /**
- * Renews an existing lease if still owned by the caller.
+ * Renews an existing lease verifying both ownerId and fencingToken.
  */
 export async function renewIdbLease(
   setNumber: number,
   ownerId: string,
-  ttlMs = LEASE_TIMEOUT_MS
+  ttlMs = LEASE_TIMEOUT_MS,
+  fencingToken?: number
 ): Promise<boolean> {
   try {
     const db = await openCoordinationDb();
@@ -990,8 +1265,18 @@ export async function renewIdbLease(
       getReq.onsuccess = () => {
         const existing = getReq.result;
         if (existing && existing.ownerId === ownerId) {
+          if (fencingToken !== undefined && existing.fencingToken !== fencingToken) {
+            renewed = false;
+            return;
+          }
           const now = Date.now();
-          const putReq = store.put({ key, setNumber, ownerId, expiresAt: now + ttlMs });
+          const putReq = store.put({
+            key,
+            setNumber,
+            ownerId,
+            fencingToken: existing.fencingToken,
+            expiresAt: now + ttlMs,
+          });
           putReq.onsuccess = () => {
             renewed = true;
           };
@@ -1024,9 +1309,13 @@ export async function renewIdbLease(
 }
 
 /**
- * Releases lease only if currently owned by the caller.
+ * Releases lease only if currently owned by the caller matching fencingToken.
  */
-export async function releaseIdbLease(setNumber: number, ownerId: string): Promise<void> {
+export async function releaseIdbLease(
+  setNumber: number,
+  ownerId: string,
+  fencingToken?: number
+): Promise<void> {
   try {
     const db = await openCoordinationDb();
     return new Promise((resolve) => {
@@ -1037,7 +1326,9 @@ export async function releaseIdbLease(setNumber: number, ownerId: string): Promi
       getReq.onsuccess = () => {
         const existing = getReq.result;
         if (existing && existing.ownerId === ownerId) {
-          store.delete(key);
+          if (fencingToken === undefined || existing.fencingToken === fencingToken) {
+            store.delete(key);
+          }
         }
       };
       tx.oncomplete = () => {
@@ -1059,14 +1350,53 @@ export async function releaseIdbLease(setNumber: number, ownerId: string): Promi
 }
 
 /**
- * Executes a recovery critical section inside an exclusive cross-tab lock.
- * Primary: Web Locks API (`navigator.locks.request` with `ifAvailable: true`).
- * Fallback: Transactional IndexedDB Lease with owner token, TTL, and heartbeat renewal.
- * Fail-safe: Fails safely with status code if no reliable locking primitive is available.
+ * Verifies that the caller currently holds active, unexpired lease ownership.
+ */
+export async function checkLeaseOwnership(
+  setNumber: number,
+  ownerId: string,
+  fencingToken?: number
+): Promise<boolean> {
+  try {
+    const db = await openCoordinationDb();
+    return new Promise((resolve) => {
+      const tx = db.transaction(IDB_STORE_LEASES, 'readonly');
+      const store = tx.objectStore(IDB_STORE_LEASES);
+      const key = `set_${setNumber}`;
+      const req = store.get(key);
+      req.onsuccess = () => {
+        const existing = req.result;
+        const now = Date.now();
+        if (
+          existing &&
+          existing.ownerId === ownerId &&
+          existing.expiresAt > now &&
+          (fencingToken === undefined || existing.fencingToken === fencingToken)
+        ) {
+          resolve(true);
+        } else {
+          resolve(false);
+        }
+      };
+      req.onerror = () => resolve(false);
+      tx.oncomplete = () => db.close();
+      tx.onerror = () => {
+        db.close();
+        resolve(false);
+      };
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Executes a recovery critical section inside an exclusive cross-tab lock with fencing tokens,
+ * owner-verified heartbeat renewal, and mandatory ownership assertions.
  */
 export async function withRecoveryLock<T>(
   setNumber: number,
-  callback: () => Promise<T>
+  callback: (checkpoint: RecoveryCheckpoint) => Promise<T>
 ): Promise<{ acquired: true; result: T } | { acquired: false; error: 'recovery_in_progress' | 'lock_unavailable' }> {
   // 1. PRIMARY MECHANISM: Web Locks API
   if (typeof navigator !== 'undefined' && navigator.locks && typeof navigator.locks.request === 'function') {
@@ -1085,7 +1415,13 @@ export async function withRecoveryLock<T>(
             return;
           }
           lockExecuted = true;
-          execResult = await callback();
+          const checkpoint: RecoveryCheckpoint = {
+            ownerId: 'weblocks_owner',
+            fencingToken: 1,
+            isOwnerValid: async () => true,
+            assertOwnership: async () => {},
+          };
+          execResult = await callback(checkpoint);
         }
       );
 
@@ -1100,23 +1436,42 @@ export async function withRecoveryLock<T>(
     }
   }
 
-  // 2. FALLBACK MECHANISM: IndexedDB Transaction-based Lease with Heartbeat Renewal
+  // 2. FALLBACK MECHANISM: IndexedDB Transaction-based Lease with Heartbeat Renewal & Fencing
   if (typeof indexedDB !== 'undefined') {
     const ownerId = `owner_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    const acquired = await acquireIdbLease(setNumber, ownerId, LEASE_TIMEOUT_MS);
-    if (!acquired) {
+    const leaseRes = await acquireIdbLeaseWithFencing(setNumber, ownerId, LEASE_TIMEOUT_MS);
+    if (!leaseRes.acquired || leaseRes.fencingToken === undefined) {
       return {
         acquired: false,
         error: 'recovery_in_progress',
       };
     }
 
+    const fencingToken = leaseRes.fencingToken;
     let heartbeatTimer: any = null;
     let leaseLost = false;
 
+    const checkpoint: RecoveryCheckpoint = {
+      ownerId,
+      fencingToken,
+      isOwnerValid: async () => {
+        if (leaseLost) return false;
+        const valid = await checkLeaseOwnership(setNumber, ownerId, fencingToken);
+        if (!valid) leaseLost = true;
+        return valid;
+      },
+      assertOwnership: async () => {
+        const valid = await checkpoint.isOwnerValid();
+        if (!valid) {
+          leaseLost = true;
+          throw new Error('RECOVERY_OWNERSHIP_LOST');
+        }
+      },
+    };
+
     heartbeatTimer = setInterval(async () => {
       try {
-        const renewed = await renewIdbLease(setNumber, ownerId, LEASE_TIMEOUT_MS);
+        const renewed = await renewIdbLease(setNumber, ownerId, LEASE_TIMEOUT_MS, fencingToken);
         if (!renewed) {
           leaseLost = true;
         }
@@ -1126,7 +1481,7 @@ export async function withRecoveryLock<T>(
     }, LEASE_HEARTBEAT_MS);
 
     try {
-      const result = await callback();
+      const result = await callback(checkpoint);
       if (leaseLost) {
         return {
           acquired: false,
@@ -1134,9 +1489,17 @@ export async function withRecoveryLock<T>(
         };
       }
       return { acquired: true, result };
+    } catch (err: any) {
+      if (err?.message === 'RECOVERY_OWNERSHIP_LOST' || leaseLost) {
+        return {
+          acquired: false,
+          error: 'recovery_in_progress',
+        };
+      }
+      throw err;
     } finally {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
-      await releaseIdbLease(setNumber, ownerId);
+      await releaseIdbLease(setNumber, ownerId, fencingToken);
     }
   }
 
@@ -1177,7 +1540,7 @@ export function notifyRecoveryComplete(setNumber: number, attemptId: string): vo
 }
 
 /**
- * Reliable Asynchronous Expired Exam Recovery with Cross-Tab Coordination.
+ * Reliable Asynchronous Expired Exam Recovery with Cross-Tab Coordination & Fencing Checkpoints.
  */
 export async function checkAndRecoverExpiredExam(
   setNumber: number,
@@ -1225,7 +1588,10 @@ export async function checkAndRecoverExpiredExam(
     return { status: 'already_recovered', attempt: existingAttempt };
   }
 
-  const lockResult = await withRecoveryLock(setNumber, async () => {
+  const lockResult = await withRecoveryLock(setNumber, async (checkpoint) => {
+    // Checkpoint 1: Before preparing the recovered attempt
+    await checkpoint.assertOwnership();
+
     const historyUnderLock = getAllAttempts().find((a) => a.attemptId === stableAttemptId);
     if (historyUnderLock) {
       await clearActiveExam(setNumber);
@@ -1241,6 +1607,9 @@ export async function checkAndRecoverExpiredExam(
       stableAttemptId,
       activeExam.examEndTime
     );
+
+    // Checkpoint 2: Immediately before persisting the attempt
+    await checkpoint.assertOwnership();
 
     const saveResult = saveAttempt(attempt);
     if (!saveResult.success) {
@@ -1261,8 +1630,20 @@ export async function checkAndRecoverExpiredExam(
       };
     }
 
-    // Await safe deletion of active exam
-    await clearActiveExam(setNumber);
+    // Checkpoint 3: Before clearing or tombstoning the active exam
+    await checkpoint.assertOwnership();
+
+    const clearResult = await clearActiveExam(setNumber);
+    if (!clearResult.success) {
+      return {
+        status: 'storage_error' as const,
+        setNumber,
+        message: clearResult.error || 'Failed to persist deletion tombstone',
+      };
+    }
+
+    // Checkpoint 4: Before marking recovery successful
+    await checkpoint.assertOwnership();
 
     try {
       localStorage.setItem(
@@ -1272,6 +1653,9 @@ export async function checkAndRecoverExpiredExam(
     } catch {
       // Ignore
     }
+
+    // Checkpoint 5: Before broadcasting EXAM_RECOVERED
+    await checkpoint.assertOwnership();
 
     notifyRecoveryComplete(setNumber, stableAttemptId);
 
@@ -1304,6 +1688,7 @@ export async function checkAndRecoverExpiredExam(
 export function clearAllUserData(): void {
   localStorage.removeItem(ATTEMPTS_KEY);
   memoryActiveExams.clear();
+  quarantinedSets.clear();
   for (let s = 1; s <= 20; s++) {
     clearActiveExam(s);
     try {

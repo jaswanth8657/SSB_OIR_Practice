@@ -4,7 +4,15 @@ import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import 'fake-indexeddb/auto';
 import { App } from '../src/App';
-import { saveActiveExam, notifyRecoveryComplete } from '../src/utils/storage';
+import {
+  saveActiveExam,
+  notifyRecoveryComplete,
+  clearActiveExam,
+  getActiveExamSync,
+  getActiveExam,
+  getSetProgress,
+  getAllAttempts,
+} from '../src/utils/storage';
 import { ActiveExamState } from '../src/types/oir';
 
 describe('Cross-Tab Recovery & App Navigation Resilience (Defect 2 & Defect 5)', () => {
@@ -239,6 +247,101 @@ describe('Cross-Tab Recovery & App Navigation Resilience (Defect 2 & Defect 5)',
 
       unmount();
       expect(removeEventListenerSpy).toHaveBeenCalledWith('storage', expect.any(Function));
+    });
+
+    it('Section 7: external recovery event tombstones active exam, updates dashboard to completed, and keeps other active set intact', async () => {
+      const now = Date.now();
+
+      // Tab A has active exam for Set 5 and active exam for Set 8
+      const state5: ActiveExamState = {
+        setNumber: 5,
+        currentQuestionIndex: 12,
+        userAnswers: { 1: { questionNumber: 1, selectedOption: 'A', isAnswered: true } },
+        examStartTime: now - 15 * 60 * 1000,
+        examEndTime: now + 10 * 60 * 1000,
+        questionTimeLeft: {},
+        currentQuestionStartedAt: now - 2 * 60 * 1000,
+        questionExpiredMap: {},
+        sessionId: 'sess_tab_a_set5',
+      };
+      const state8: ActiveExamState = {
+        setNumber: 8,
+        currentQuestionIndex: 3,
+        userAnswers: { 1: { questionNumber: 1, selectedOption: 'B', isAnswered: true } },
+        examStartTime: now,
+        examEndTime: now + 20 * 60 * 1000,
+        questionTimeLeft: {},
+        currentQuestionStartedAt: now,
+        questionExpiredMap: {},
+        sessionId: 'sess_tab_a_set8',
+      };
+
+      await saveActiveExam(state5);
+      await saveActiveExam(state8);
+
+      const { unmount } = render(<App />);
+
+      // External Tab B completes recovery of Set 5:
+      // Writes attempt to history and writes tombstone for Set 5
+      const recoveredAttempt = {
+        attemptId: 'att_5_external_tab_b',
+        setNumber: 5,
+        timestamp: now - 5 * 60 * 1000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 42,
+        correctAnswers: 42,
+        incorrectAnswers: 8,
+        unansweredQuestions: 0,
+        excludedQuestions: 0,
+        accuracyPercentage: 84,
+        timeTakenSeconds: 1200,
+        userAnswers: {},
+      };
+      const storeHistory = store['oir_test_attempts_v1'] ? JSON.parse(store['oir_test_attempts_v1']) : [];
+      storeHistory.push(recoveredAttempt);
+      store['oir_test_attempts_v1'] = JSON.stringify(storeHistory);
+
+      // Tab B tombstones Set 5
+      await clearActiveExam(5);
+
+      // Tab B broadcasts recovery notification
+      const storageEvent = new StorageEvent('storage', {
+        key: 'oir_recovery_sync_event',
+        newValue: JSON.stringify({
+          type: 'EXAM_RECOVERED',
+          setNumber: 5,
+          attemptId: 'att_5_external_tab_b',
+          timestamp: Date.now(),
+        }),
+      });
+
+      await act(async () => {
+        window.dispatchEvent(storageEvent);
+      });
+
+      // 1. Set 5 active exam cannot be restored
+      expect(getActiveExamSync(5)).toBeNull();
+      expect(await getActiveExam(5)).toBeNull();
+
+      // 2. Set 5 progress reports completed with 1 attempt
+      const prog5 = getSetProgress(5);
+      expect(prog5.status).toBe('completed');
+      expect(prog5.attemptsCount).toBe(1);
+      expect(prog5.bestScore).toBe(42);
+
+      // 3. Set 8 active exam remains completely in-progress and unaffected
+      expect(getActiveExamSync(8)).not.toBeNull();
+      const prog8 = getSetProgress(8);
+      expect(prog8.status).toBe('in_progress');
+
+      // 4. Duplicate recovery notifications are idempotent
+      await act(async () => {
+        window.dispatchEvent(storageEvent);
+      });
+      expect(getSetProgress(5).attemptsCount).toBe(1);
+
+      unmount();
     });
   });
 });

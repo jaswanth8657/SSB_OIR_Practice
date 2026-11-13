@@ -106,10 +106,23 @@ export interface VersionedActiveExamRecord {
   setNumber: number;
   revision: number;
   updatedAt: number;
-  state: ActiveExamState;
-  checksum?: string;
+  sessionId: string;
   storageVersion: number;
-  isDeleted?: boolean;
+  isDeleted: boolean;
+  state?: ActiveExamState;
+}
+
+export interface ClearActiveExamResult {
+  success: boolean;
+  error?: string;
+  tombstone?: VersionedActiveExamRecord;
+}
+
+export interface RecoveryCheckpoint {
+  ownerId: string;
+  fencingToken: number;
+  assertOwnership: () => Promise<void>;
+  isOwnerValid: () => Promise<boolean>;
 }
 
 export interface UserSettings {
@@ -136,6 +149,7 @@ export interface ActiveExamState {
   currentQuestionStartedAt: number; // timestamp ms when active question started
   questionExpiredMap: Record<number, boolean>; // questions whose time has run out
   isPaused?: boolean;
+  sessionId?: string;
 }
 
 export interface OverallStats {

@@ -32,6 +32,7 @@ import {
   checkAndRecoverExpiredExam,
   hydrateActiveExamCache,
   invalidateActiveExamCache,
+  quarantineSetForHydration,
 } from './utils/storage';
 
 export const App: React.FC = () => {
@@ -101,8 +102,13 @@ export const App: React.FC = () => {
         return;
       }
 
-      // Invalidate active exam cache for the recovered set
-      invalidateActiveExamCache(setNum);
+      // Invalidate and quarantine active exam cache for the recovered set
+      quarantineSetForHydration(setNum);
+
+      // Asynchronously await authoritative hydration
+      getActiveExam(setNum).catch((err) => {
+        console.warn(`Failed to hydrate active exam for recovered Set ${setNum}:`, err);
+      });
 
       // Refresh user progress and dashboard statistics
       refreshUserData();
@@ -293,9 +299,9 @@ export const App: React.FC = () => {
   };
 
   // Start exam from TestStartModal
-  const handleStartExam = () => {
+  const handleStartExam = async () => {
     // Clear any previous attempt state
-    clearActiveExam(activeSetNumber);
+    await clearActiveExam(activeSetNumber);
     setResumedExamState(null);
     setCurrentView('exam');
   };
@@ -328,8 +334,8 @@ export const App: React.FC = () => {
   };
 
   // Attempt Again
-  const handleAttemptAgain = (setNumber: number) => {
-    clearActiveExam(setNumber);
+  const handleAttemptAgain = async (setNumber: number) => {
+    await clearActiveExam(setNumber);
     setResumedExamState(null);
     setActiveSetNumber(setNumber);
     const questions = getQuestionsForSet(setNumber);

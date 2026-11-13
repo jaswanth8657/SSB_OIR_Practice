@@ -4,6 +4,7 @@ import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { ExamInterface } from '../src/components/ExamInterface';
 import { Question, UserSettings, ActiveExamState } from '../src/types/oir';
+import { getActiveExamSync } from '../src/utils/storage';
 
 describe('ExamInterface Component Integration (src/components/ExamInterface.tsx)', () => {
   const mockSettings: UserSettings = {
@@ -334,7 +335,7 @@ describe('ExamInterface Component Integration (src/components/ExamInterface.tsx)
   });
 
   // 12: TASK 1 - Failed manual submission preserves active exam and allows retry
-  it('handles failed manual submission: retains active exam, displays error, and allows retry', () => {
+  it('handles failed manual submission: retains active exam, displays error, and allows retry', async () => {
     const onFinish = vi.fn();
 
     // Start with storage failing on attempts key
@@ -355,7 +356,7 @@ describe('ExamInterface Component Integration (src/components/ExamInterface.tsx)
       },
     });
 
-    act(() => {
+    await act(async () => {
       render(
         <ExamInterface
           setNumber={1}
@@ -368,15 +369,16 @@ describe('ExamInterface Component Integration (src/components/ExamInterface.tsx)
     });
 
     // Answer Q1
-    act(() => {
+    await act(async () => {
       fireEvent.click(screen.getByText('Option A'));
+      await Promise.resolve();
     });
 
     // Open submit modal & submit
-    act(() => {
+    await act(async () => {
       fireEvent.click(screen.getByText('Submit Test'));
     });
-    act(() => {
+    await act(async () => {
       fireEvent.click(screen.getByText('Yes, Submit Now'));
     });
 
@@ -401,19 +403,20 @@ describe('ExamInterface Component Integration (src/components/ExamInterface.tsx)
     failStorage = false;
 
     // Click Retry Saving
-    act(() => {
+    await act(async () => {
       fireEvent.click(retryBtn);
+      await Promise.resolve();
     });
 
     // onFinish is now successfully called!
     expect(onFinish).toHaveBeenCalledTimes(1);
 
-    // Active exam state is now cleared from storage
-    expect(store['oir_active_exam_set_1']).toBeUndefined();
+    // Active exam state is now cleared/tombstoned from storage
+    expect(getActiveExamSync(1)).toBeNull();
   });
 
   // 13: TASK 1 - Failed automatic overall timer expiration submission allows retry
-  it('handles failed overall timer submission: retains exam, displays error modal, and retries cleanly', () => {
+  it('handles failed overall timer submission: retains exam, displays error modal, and retries cleanly', async () => {
     const onFinish = vi.fn();
 
     let failStorage = true;
@@ -433,7 +436,7 @@ describe('ExamInterface Component Integration (src/components/ExamInterface.tsx)
       },
     });
 
-    act(() => {
+    await act(async () => {
       render(
         <ExamInterface
           setNumber={1}
@@ -446,8 +449,9 @@ describe('ExamInterface Component Integration (src/components/ExamInterface.tsx)
     });
 
     // Fast forward entire test duration (25 mins)
-    act(() => {
+    await act(async () => {
       vi.advanceTimersByTime(25 * 60 * 1000);
+      await Promise.resolve();
     });
 
     // Storage failed: onFinish MUST NOT be called!
@@ -469,12 +473,13 @@ describe('ExamInterface Component Integration (src/components/ExamInterface.tsx)
     // Storage issue resolved
     failStorage = false;
 
-    act(() => {
+    await act(async () => {
       fireEvent.click(retryBtn);
+      await Promise.resolve();
     });
 
     // onFinish called after successful retry
     expect(onFinish).toHaveBeenCalledTimes(1);
-    expect(store['oir_active_exam_set_1']).toBeUndefined();
+    expect(getActiveExamSync(1)).toBeNull();
   });
 });

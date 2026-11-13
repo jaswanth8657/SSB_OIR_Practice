@@ -52,6 +52,11 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
   const totalQuestions = questions.length;
   const isSubmittingRef = useRef<boolean>(false);
 
+  // Stable session ID for this exam lifecycle
+  const sessionIdRef = useRef<string>(
+    initialState?.sessionId || `sess_${setNumber}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+  );
+
   // Active question index (0 to 49)
   const initialIndex = initialState
     ? Math.min(totalQuestions - 1, Math.max(0, initialState.currentQuestionIndex))
@@ -172,7 +177,9 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
 
       const saveRes = saveAttempt(attempt);
       if (saveRes.success) {
-        clearActiveExam(setNumber);
+        clearActiveExam(setNumber).catch((err) => {
+          console.warn('Failed to clear active exam after submission:', err);
+        });
         setIsSaving(false);
         onFinish(attempt);
       } else {
@@ -391,6 +398,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
       questionTimeLeft,
       currentQuestionStartedAt,
       questionExpiredMap,
+      sessionId: sessionIdRef.current,
     };
     saveActiveExam(activeState).then((res) => {
       if (!res.success) {
@@ -414,6 +422,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
       questionTimeLeft,
       currentQuestionStartedAt,
       questionExpiredMap,
+      sessionId: sessionIdRef.current,
     };
     try {
       const res = await saveActiveExam(activeState);
