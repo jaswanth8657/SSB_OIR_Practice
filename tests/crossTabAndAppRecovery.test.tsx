@@ -112,35 +112,125 @@ describe('Cross-Tab Recovery & App Navigation Resilience (Defect 2 & Defect 5)',
 
   // DEFECT 5: Cross-Tab Recovery Synchronization
   describe('Cross-Tab Synchronization (Defect 5)', () => {
-    it('Defect 5: BroadcastChannel message refreshes state and clears recovery error banner', async () => {
-      render(<App />);
+    it('Defect 5: BroadcastChannel message updates dashboard from in_progress to completed, increments attempt count, and invalidates cache', async () => {
+      const now = Date.now();
+      const activeExamState: ActiveExamState = {
+        setNumber: 3,
+        currentQuestionIndex: 10,
+        userAnswers: { 1: { questionNumber: 1, selectedOption: '1', isAnswered: true } },
+        examStartTime: now - 35 * 60 * 1000,
+        examEndTime: now + 10 * 60 * 1000, // active in progress
+        questionTimeLeft: {},
+        currentQuestionStartedAt: now,
+        questionExpiredMap: {},
+      };
+      await saveActiveExam(activeExamState);
 
-      act(() => {
-        notifyRecoveryComplete(3, 'att_3_mock');
+      const { unmount } = render(<App />);
+
+      // Verify Set 3 starts with 'in_progress' and 0 completed attempts
+      const resumeButtonsBefore = await screen.findAllByRole('button', { name: /Resume Test/i });
+      expect(resumeButtonsBefore.length).toBeGreaterThan(0);
+
+      // Simulate recovery in another tab: save recovered attempt into permanent history
+      const recoveredAttempt = {
+        attemptId: 'att_3_recovered_sync',
+        setNumber: 3,
+        timestamp: now,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 45,
+        correctAnswers: 45,
+        incorrectAnswers: 5,
+        unansweredQuestions: 0,
+        excludedQuestions: 0,
+        accuracyPercentage: 90,
+        timeTakenSeconds: 1200,
+        userAnswers: {},
+      };
+      const storeHistory = store['oir_test_attempts_v1'] ? JSON.parse(store['oir_test_attempts_v1']) : [];
+      storeHistory.push(recoveredAttempt);
+      store['oir_test_attempts_v1'] = JSON.stringify(storeHistory);
+
+      // Clear active exam on recovered set
+      delete store['oir_active_exam_set_3'];
+
+      // Send cross-tab recovery broadcast
+      await act(async () => {
+        notifyRecoveryComplete(3, 'att_3_recovered_sync');
       });
 
-      // Verify dashboard remains healthy
-      expect(screen.getByText(/Questions Practiced/i)).toBeDefined();
+      // Verify concrete state transition:
+      // 1. Attempts history has exactly 1 attempt for Set 3
+      const updatedHistory = JSON.parse(store['oir_test_attempts_v1'] || '[]');
+      const set3Attempts = updatedHistory.filter((a: any) => a.setNumber === 3);
+      expect(set3Attempts.length).toBe(1);
+      expect(set3Attempts[0].attemptId).toBe('att_3_recovered_sync');
+
+      // 2. Retake button is now displayed instead of Resume Test
+      const retakeButtons = await screen.findAllByRole('button', { name: /Retake Test/i });
+      expect(retakeButtons.length).toBeGreaterThan(0);
+
+      unmount();
     });
 
     it('Defect 5: storage event fallback triggers synchronization when BroadcastChannel is unavailable', async () => {
-      render(<App />);
+      const now = Date.now();
+      const activeExamState: ActiveExamState = {
+        setNumber: 4,
+        currentQuestionIndex: 5,
+        userAnswers: {},
+        examStartTime: now - 35 * 60 * 1000,
+        examEndTime: now + 10 * 60 * 1000,
+        questionTimeLeft: {},
+        currentQuestionStartedAt: now,
+        questionExpiredMap: {},
+      };
+      await saveActiveExam(activeExamState);
+
+      const { unmount } = render(<App />);
+
+      // Put attempt in history
+      const recoveredAttempt = {
+        attemptId: 'att_4_storage_sync',
+        setNumber: 4,
+        timestamp: now,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 48,
+        correctAnswers: 48,
+        incorrectAnswers: 2,
+        unansweredQuestions: 0,
+        excludedQuestions: 0,
+        accuracyPercentage: 96,
+        timeTakenSeconds: 1100,
+        userAnswers: {},
+      };
+      const storeHistory = store['oir_test_attempts_v1'] ? JSON.parse(store['oir_test_attempts_v1']) : [];
+      storeHistory.push(recoveredAttempt);
+      store['oir_test_attempts_v1'] = JSON.stringify(storeHistory);
+
+      delete store['oir_active_exam_set_4'];
 
       const storageEvent = new StorageEvent('storage', {
         key: 'oir_recovery_sync_event',
         newValue: JSON.stringify({
           type: 'EXAM_RECOVERED',
           setNumber: 4,
-          attemptId: 'att_4_mock',
+          attemptId: 'att_4_storage_sync',
           timestamp: Date.now(),
         }),
       });
 
-      act(() => {
+      await act(async () => {
         window.dispatchEvent(storageEvent);
       });
 
-      expect(screen.getByText(/Questions Practiced/i)).toBeDefined();
+      const updatedHistory = JSON.parse(store['oir_test_attempts_v1'] || '[]');
+      const set4Attempts = updatedHistory.filter((a: any) => a.setNumber === 4);
+      expect(set4Attempts.length).toBe(1);
+
+      unmount();
     });
 
     it('Defect 5: cleans up event listeners when component unmounts', () => {

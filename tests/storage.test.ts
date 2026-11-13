@@ -15,7 +15,11 @@ import {
   checkAndRecoverExpiredExam,
   normalizeLegacyAttempt,
   acquireIdbLease,
+  renewIdbLease,
   releaseIdbLease,
+  hydrateActiveExamCache,
+  invalidateActiveExamCache,
+  isStateDeepEqual,
   DEFAULT_SETTINGS,
 } from '../src/utils/storage';
 import { Question, ActiveExamState, TestAttempt } from '../src/types/oir';
@@ -580,6 +584,288 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       expect(normalized.maxScore).toBe(50);
       expect(normalized.excludedQuestions).toBe(0);
     });
+
+    it('Part 3: Rejects normalization when Q11 object is incomplete or missing questionNumber', () => {
+      const att: TestAttempt = {
+        attemptId: 'att_6_incomplete_q11',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 40,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: {} as any,
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(att);
+      expect(normalized.score).toBe(40);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+    });
+
+    it('Part 3: Rejects normalization when Q11 record has questionNumber !== 11', () => {
+      const att: TestAttempt = {
+        attemptId: 'att_6_wrong_qnum',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 40,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 12, isAnswered: true, isCorrect: true } as any,
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(att);
+      expect(normalized.score).toBe(40);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+    });
+
+    it('Part 3: Rejects normalization when isCorrect is not a boolean', () => {
+      const att: TestAttempt = {
+        attemptId: 'att_6_non_bool_is_correct',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 40,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: true, isCorrect: 'yes' as any },
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(att);
+      expect(normalized.score).toBe(40);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+    });
+
+    it('Part 3: Rejects normalization when flags are contradictory (isAnswered: false, isCorrect: true)', () => {
+      const att: TestAttempt = {
+        attemptId: 'att_6_contradictory_flags',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 40,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: false, isCorrect: true },
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(att);
+      expect(normalized.score).toBe(40);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+    });
+
+    it('Part 3: Rejects normalization when score or counters are decimals/floats', () => {
+      const attFloatScore: TestAttempt = {
+        attemptId: 'att_6_float_score',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 40.5,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: true, isCorrect: true },
+        },
+      };
+
+      const norm1 = normalizeLegacyAttempt(attFloatScore);
+      expect(norm1.isLegacyUnverified).toBe(true);
+      expect(norm1.legacyStatus).toBe('review_required');
+
+      const attFloatCorrect: TestAttempt = {
+        ...attFloatScore,
+        score: 40,
+        correctAnswers: 40.2,
+      };
+      const norm2 = normalizeLegacyAttempt(attFloatCorrect);
+      expect(norm2.isLegacyUnverified).toBe(true);
+      expect(norm2.legacyStatus).toBe('review_required');
+    });
+
+    it('Part 3: Rejects normalization when score is NaN', () => {
+      const attNaN: TestAttempt = {
+        attemptId: 'att_6_nan_score',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: NaN,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: true, isCorrect: true },
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(attNaN);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+    });
+
+    it('Part 3: Rejects normalization when totalQuestions !== 50', () => {
+      const attWrongTotal: TestAttempt = {
+        attemptId: 'att_6_wrong_total',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 49,
+        maxScore: 49,
+        score: 40,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 1,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: true, isCorrect: true },
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(attWrongTotal);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+    });
+
+    it('Part 3: Rejects normalization when score does not match correctAnswers', () => {
+      const attMismatchedScore: TestAttempt = {
+        attemptId: 'att_6_mismatched_score',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 45,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: true, isCorrect: true },
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(attMismatchedScore);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+    });
+
+    it('Part 3: Rejects normalization when incorrectAnswers < 1 for Case B or unanswered < 1 for Case C', () => {
+      // Case B with incorrectAnswers === 0
+      const attCaseBZero: TestAttempt = {
+        attemptId: 'att_6_case_b_zero',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 50,
+        correctAnswers: 50,
+        incorrectAnswers: 0,
+        unansweredQuestions: 0,
+        excludedQuestions: 0,
+        accuracyPercentage: 100,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: true, isCorrect: false },
+        },
+      };
+
+      const normB = normalizeLegacyAttempt(attCaseBZero);
+      expect(normB.isLegacyUnverified).toBe(true);
+      expect(normB.legacyStatus).toBe('review_required');
+
+      // Case C with unansweredQuestions === 0
+      const attCaseCZero: TestAttempt = {
+        attemptId: 'att_6_case_c_zero',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 45,
+        correctAnswers: 45,
+        incorrectAnswers: 5,
+        unansweredQuestions: 0,
+        excludedQuestions: 0,
+        accuracyPercentage: 90,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: false },
+        },
+      };
+
+      const normC = normalizeLegacyAttempt(attCaseCZero);
+      expect(normC.isLegacyUnverified).toBe(true);
+      expect(normC.legacyStatus).toBe('review_required');
+    });
+
+    it('Part 3: Repeated runs on already review_required attempts are idempotent', () => {
+      const attReview: TestAttempt = {
+        attemptId: 'att_6_already_review',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 40,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {},
+        isLegacyUnverified: true,
+        legacyStatus: 'review_required',
+        originalScore: 40,
+      };
+
+      const pass1 = normalizeLegacyAttempt(attReview);
+      expect(pass1.score).toBe(40);
+      expect(pass1.legacyStatus).toBe('review_required');
+
+      const pass2 = normalizeLegacyAttempt(pass1);
+      expect(pass2.score).toBe(40);
+      expect(pass2.legacyStatus).toBe('review_required');
+    });
   });
 
   // 6. Cross-Tab Recovery Locking & Concurrency (Task 2 & Task 4)
@@ -996,6 +1282,235 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
         );
         expect(res).toBeDefined();
       }
+    });
+
+    it('Part 5: renewIdbLease extends lease expiration when called by legitimate owner', async () => {
+      const owner = 'owner_heartbeat_test';
+      const acquired = await acquireIdbLease(8, owner, 1000);
+      expect(acquired).toBe(true);
+
+      const renewed = await renewIdbLease(8, owner, 5000);
+      expect(renewed).toBe(true);
+
+      // Attempt renewal by a different owner must be rejected
+      const rejected = await renewIdbLease(8, 'imposter_owner', 5000);
+      expect(rejected).toBe(false);
+
+      await releaseIdbLease(8, owner);
+    });
+  });
+
+  // 9. Part 1 & Part 2: Dual-Store Versioned Resolution & State Integrity
+  describe('Dual-Store Versioned Envelope & Deep State Integrity (Part 1 & 2)', () => {
+    it('Part 1: prefers IndexedDB when IDB has higher revision and repairs stale localStorage', async () => {
+      const now = Date.now();
+      const olderState: ActiveExamState = {
+        setNumber: 11,
+        currentQuestionIndex: 2,
+        userAnswers: { 1: { questionNumber: 1, selectedOption: 'A', isAnswered: true } },
+        examStartTime: now - 5000,
+        examEndTime: now + 20 * 60 * 1000,
+        questionTimeLeft: { 2: 30 },
+        currentQuestionStartedAt: now - 5000,
+        questionExpiredMap: {},
+      };
+
+      const newerState: ActiveExamState = {
+        setNumber: 11,
+        currentQuestionIndex: 15,
+        userAnswers: {
+          1: { questionNumber: 1, selectedOption: 'A', isAnswered: true },
+          15: { questionNumber: 15, selectedOption: 'D', isAnswered: true },
+        },
+        examStartTime: now - 5000,
+        examEndTime: now + 20 * 60 * 1000,
+        questionTimeLeft: { 15: 18 },
+        currentQuestionStartedAt: now - 1000,
+        questionExpiredMap: {},
+      };
+
+      // Put revision 1 in localStorage
+      store['oir_active_exam_set_11'] = JSON.stringify({
+        setNumber: 11,
+        revision: 1,
+        updatedAt: now - 2000,
+        state: olderState,
+        storageVersion: 1,
+      });
+
+      // Put revision 2 in IndexedDB
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const req = indexedDB.open('oir_hub_coordination', 2);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction('active_exams', 'readwrite');
+        const st = tx.objectStore('active_exams');
+        st.put({
+          setNumber: 11,
+          revision: 2,
+          updatedAt: now - 500,
+          state: newerState,
+          storageVersion: 1,
+        });
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => {
+          db.close();
+          reject();
+        };
+      });
+
+      // Invalidate memory cache so getActiveExam reads both stores
+      invalidateActiveExamCache(11);
+
+      const resolved = await getActiveExam(11);
+      expect(resolved).not.toBeNull();
+      // Must have selected the newer IDB state (currentQuestionIndex 15)
+      expect(resolved?.currentQuestionIndex).toBe(15);
+      expect(resolved?.userAnswers[15]?.selectedOption).toBe('D');
+
+      // Must have repaired localStorage with the newer revision
+      const repairedRaw = store['oir_active_exam_set_11'];
+      expect(repairedRaw).toBeDefined();
+      const repairedParsed = JSON.parse(repairedRaw);
+      expect(repairedParsed.revision).toBe(2);
+      expect(repairedParsed.state.currentQuestionIndex).toBe(15);
+    });
+
+    it('Part 1: prefers localStorage when localStorage has higher revision and repairs IndexedDB', async () => {
+      const now = Date.now();
+      const olderState: ActiveExamState = {
+        setNumber: 13,
+        currentQuestionIndex: 5,
+        userAnswers: {},
+        examStartTime: now,
+        examEndTime: now + 10000,
+        questionTimeLeft: {},
+        currentQuestionStartedAt: now,
+        questionExpiredMap: {},
+      };
+
+      const newerState: ActiveExamState = {
+        setNumber: 13,
+        currentQuestionIndex: 20,
+        userAnswers: { 20: { questionNumber: 20, selectedOption: 'C', isAnswered: true } },
+        examStartTime: now,
+        examEndTime: now + 10000,
+        questionTimeLeft: {},
+        currentQuestionStartedAt: now,
+        questionExpiredMap: {},
+      };
+
+      // Put revision 1 in IndexedDB
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const req = indexedDB.open('oir_hub_coordination', 2);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction('active_exams', 'readwrite');
+        const st = tx.objectStore('active_exams');
+        st.put({
+          setNumber: 13,
+          revision: 1,
+          updatedAt: now - 3000,
+          state: olderState,
+          storageVersion: 1,
+        });
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => {
+          db.close();
+          reject();
+        };
+      });
+
+      // Put revision 3 in localStorage
+      store['oir_active_exam_set_13'] = JSON.stringify({
+        setNumber: 13,
+        revision: 3,
+        updatedAt: now,
+        state: newerState,
+        storageVersion: 1,
+      });
+
+      invalidateActiveExamCache(13);
+
+      const resolved = await getActiveExam(13);
+      expect(resolved).not.toBeNull();
+      expect(resolved?.currentQuestionIndex).toBe(20);
+      expect(resolved?.userAnswers[20]?.selectedOption).toBe('C');
+    });
+
+    it('Part 1: handles legacy unversioned active exam migration cleanly', async () => {
+      const now = Date.now();
+      const legacyRawState: ActiveExamState = {
+        setNumber: 14,
+        currentQuestionIndex: 7,
+        userAnswers: { 1: { questionNumber: 1, selectedOption: '3', isAnswered: true } },
+        examStartTime: now - 10000,
+        examEndTime: now + 15 * 60 * 1000,
+        questionTimeLeft: { 7: 25 },
+        currentQuestionStartedAt: now - 10000,
+        questionExpiredMap: {},
+      };
+
+      // Store raw unversioned state without envelope
+      store['oir_active_exam_set_14'] = JSON.stringify(legacyRawState);
+      invalidateActiveExamCache(14);
+
+      const loaded = await getActiveExam(14);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.setNumber).toBe(14);
+      expect(loaded?.currentQuestionIndex).toBe(7);
+      expect(loaded?.userAnswers[1]?.selectedOption).toBe('3');
+    });
+
+    it('Part 2: isStateDeepEqual detects deep modifications in userAnswers, timers, and flags', () => {
+      const now = Date.now();
+      const baseState: ActiveExamState = {
+        setNumber: 10,
+        currentQuestionIndex: 4,
+        userAnswers: {
+          1: { questionNumber: 1, selectedOption: 'A', isAnswered: true, isCorrect: true, timeSpentSeconds: 15 },
+          2: { questionNumber: 2, twoPartAnswer: ['X', 'Y'], isAnswered: true, timeSpentSeconds: 20 },
+        },
+        examStartTime: now - 10000,
+        examEndTime: now + 20000,
+        questionTimeLeft: { 4: 25 },
+        currentQuestionStartedAt: now - 5000,
+        questionExpiredMap: { 1: true, 2: false },
+      };
+
+      // Exact clone must return true
+      const cloned = JSON.parse(JSON.stringify(baseState));
+      expect(isStateDeepEqual(baseState, cloned)).toBe(true);
+
+      // Modified selectedOption
+      const diffOption = JSON.parse(JSON.stringify(baseState));
+      diffOption.userAnswers[1].selectedOption = 'B';
+      expect(isStateDeepEqual(baseState, diffOption)).toBe(false);
+
+      // Modified twoPartAnswer
+      const diffTwoPart = JSON.parse(JSON.stringify(baseState));
+      diffTwoPart.userAnswers[2].twoPartAnswer = ['X', 'Z'];
+      expect(isStateDeepEqual(baseState, diffTwoPart)).toBe(false);
+
+      // Modified questionTimeLeft
+      const diffTimer = JSON.parse(JSON.stringify(baseState));
+      diffTimer.questionTimeLeft[4] = 10;
+      expect(isStateDeepEqual(baseState, diffTimer)).toBe(false);
+
+      // Modified questionExpiredMap
+      const diffExpired = JSON.parse(JSON.stringify(baseState));
+      diffExpired.questionExpiredMap[2] = true;
+      expect(isStateDeepEqual(baseState, diffExpired)).toBe(false);
     });
   });
 });

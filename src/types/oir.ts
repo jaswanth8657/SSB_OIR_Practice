@@ -102,6 +102,16 @@ export interface RecoveryBroadcastMessage {
   timestamp: number;
 }
 
+export interface VersionedActiveExamRecord {
+  setNumber: number;
+  revision: number;
+  updatedAt: number;
+  state: ActiveExamState;
+  checksum?: string;
+  storageVersion: number;
+  isDeleted?: boolean;
+}
+
 export interface UserSettings {
   questionTimeSeconds: number;
   totalDurationMinutes: number;

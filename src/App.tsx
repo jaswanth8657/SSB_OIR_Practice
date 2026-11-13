@@ -26,9 +26,12 @@ import {
   getOverallStats,
   getActiveExam,
   getAttemptsForSet,
+  getAllAttempts,
   clearAllUserData,
   clearActiveExam,
   checkAndRecoverExpiredExam,
+  hydrateActiveExamCache,
+  invalidateActiveExamCache,
 } from './utils/storage';
 
 export const App: React.FC = () => {
@@ -79,11 +82,32 @@ export const App: React.FC = () => {
   // Defect 5: Listen for cross-tab recovery coordination via BroadcastChannel and storage events
   useEffect(() => {
     const handleRecoverySync = (data: any) => {
-      if (!data || data.type !== 'EXAM_RECOVERED' || typeof data.setNumber !== 'number') {
+      if (
+        !data ||
+        data.type !== 'EXAM_RECOVERED' ||
+        typeof data.setNumber !== 'number' ||
+        data.setNumber < 1 ||
+        data.setNumber > 20 ||
+        typeof data.attemptId !== 'string' ||
+        !data.attemptId.trim()
+      ) {
         return;
       }
       const setNum = data.setNumber;
+
+      // Confirm attempt exists in permanent history before processing recovery
+      const inHistory = getAllAttempts().some((a) => a.attemptId === data.attemptId);
+      if (!inHistory) {
+        return;
+      }
+
+      // Invalidate active exam cache for the recovered set
+      invalidateActiveExamCache(setNum);
+
+      // Refresh user progress and dashboard statistics
       refreshUserData();
+
+      // Clear any recovery error banner for that set
       setRecoveryErrors((prev) => {
         if (!prev[setNum]) return prev;
         const updated = { ...prev };
@@ -130,6 +154,9 @@ export const App: React.FC = () => {
     let isCancelled = false;
 
     async function runStartupRecovery() {
+      // Hydrate active exam cache from both persistence stores
+      await hydrateActiveExamCache();
+
       const recoveredList: TestAttempt[] = [];
       const newErrors: Record<number, string> = {};
 
