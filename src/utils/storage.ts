@@ -5,9 +5,8 @@ import {
   ActiveExamState,
   OverallStats,
   Question,
-  UserAnswer,
 } from '../types/oir';
-import { evaluateAnswer } from './evaluator';
+import { buildTestAttempt } from './scoring';
 
 const SETTINGS_KEY = 'oir_user_settings_v1';
 const ATTEMPTS_KEY = 'oir_test_attempts_v1';
@@ -70,14 +69,19 @@ export function getAttemptsForSet(setNumber: number): TestAttempt[] {
 }
 
 export function saveAttempt(attempt: TestAttempt): void {
-  const all = getAllAttempts();
-  // Guard against duplicate attempt ID
-  if (!all.some((a) => a.attemptId === attempt.attemptId)) {
-    all.push(attempt);
-    localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(all));
+  try {
+    const raw = localStorage.getItem(ATTEMPTS_KEY);
+    const all: TestAttempt[] = raw ? JSON.parse(raw) : [];
+
+    // Idempotency: guard against duplicate attempt ID
+    const exists = all.some((a) => a.attemptId === attempt.attemptId);
+    if (!exists) {
+      all.push(attempt);
+      localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(all));
+    }
+  } catch (err) {
+    console.error('Failed to save test attempt:', err);
   }
-  // Clear active exam state
-  clearActiveExam(attempt.setNumber);
 }
 
 export function getSetProgress(setNumber: number): SetProgress {
@@ -143,11 +147,11 @@ export function getOverallStats(): OverallStats {
 
   for (const att of attempts) {
     totalCorrect += att.correctAnswers;
-    // Count questions actually answered in this attempt
+    // Count questions actually answered in this attempt (excluding excluded questions)
     let attAnswered = 0;
     if (att.userAnswers) {
       Object.values(att.userAnswers).forEach((u) => {
-        if (u.isAnswered) attAnswered++;
+        if (u.isAnswered && !u.isExcluded) attAnswered++;
       });
     } else {
       attAnswered = att.correctAnswers + att.incorrectAnswers;
@@ -194,13 +198,20 @@ export function saveActiveExam(state: ActiveExamState): void {
 }
 
 export function clearActiveExam(setNumber: number): void {
-  localStorage.removeItem(`${ACTIVE_EXAM_PREFIX}${setNumber}`);
-  sessionStorage.removeItem(`${SUBMISSION_GUARD_KEY}${setNumber}`);
+  try {
+    localStorage.removeItem(`${ACTIVE_EXAM_PREFIX}${setNumber}`);
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(`${SUBMISSION_GUARD_KEY}${setNumber}`);
+    }
+  } catch {
+    // Ignore storage clear errors in headless environments
+  }
 }
 
 /**
- * Task 7: Expired Exam Recovery
- * If overall exam timer has expired, grades saved answers, records completed attempt, and clears active state.
+ * Task 3 & Task 6 & Task 7: Expired Exam Recovery
+ * If overall exam timer has expired, evaluates saved answers using the shared scoring engine,
+ * records the completed attempt with a stable deterministic attemptId, and safely clears active state.
  */
 export function checkAndRecoverExpiredExam(
   setNumber: number,
@@ -216,64 +227,38 @@ export function checkAndRecoverExpiredExam(
     return null; // Not expired yet
   }
 
-  // Prevent duplicate submissions using submission guard
-  const guardKey = `${SUBMISSION_GUARD_KEY}${setNumber}`;
-  if (sessionStorage.getItem(guardKey)) {
-    return null;
+  // Derive stable deterministic attempt ID from the examination session
+  const examSessionStart = activeExam.examStartTime || (activeExam.examEndTime - settings.totalDurationMinutes * 60 * 1000);
+  const stableAttemptId = `att_${setNumber}_${examSessionStart}`;
+
+  // Check if this attempt was already recorded in history
+  const allAttempts = getAllAttempts();
+  const existingAttempt = allAttempts.find((a) => a.attemptId === stableAttemptId);
+  if (existingAttempt) {
+    // Already saved; clean up residual active exam and return the existing attempt
+    clearActiveExam(setNumber);
+    return existingAttempt;
   }
-  sessionStorage.setItem(guardKey, 'submitted');
 
-  // Compute grade from saved answers
-  let correctCount = 0;
-  let incorrectCount = 0;
-  let unansweredCount = 0;
-  const gradedAnswers: Record<number, UserAnswer> = {};
+  // Calculate total test time
+  const totalTimeSeconds = settings.totalDurationMinutes * 60;
 
-  questions.forEach((q) => {
-    const uAns = activeExam.userAnswers?.[q.questionNumber];
-    if (!uAns || !uAns.isAnswered) {
-      unansweredCount++;
-      gradedAnswers[q.questionNumber] = {
-        questionNumber: q.questionNumber,
-        selectedOption: undefined,
-        isAnswered: false,
-        isCorrect: false,
-      };
-    } else {
-      const evalRes = evaluateAnswer(
-        q,
-        uAns.selectedOption,
-        uAns.twoPartAnswer,
-        uAns.dropdownSelection
-      );
-      if (evalRes.isCorrect) {
-        correctCount++;
-        gradedAnswers[q.questionNumber] = { ...uAns, isCorrect: true };
-      } else {
-        incorrectCount++;
-        gradedAnswers[q.questionNumber] = { ...uAns, isCorrect: false };
-      }
-    }
-  });
-
-  const totalTime = settings.totalDurationMinutes * 60;
-  const answeredCount = correctCount + incorrectCount;
-  const attempt: TestAttempt = {
-    attemptId: `att_${setNumber}_${now}`,
+  // Grade using shared production scoring engine
+  const attempt = buildTestAttempt(
     setNumber,
-    timestamp: now,
-    totalQuestions: questions.length,
-    correctAnswers: correctCount,
-    incorrectAnswers: incorrectCount,
-    unansweredQuestions: unansweredCount,
-    score: correctCount,
-    accuracyPercentage: answeredCount > 0 ? Math.round((correctCount / answeredCount) * 100) : 0,
-    timeTakenSeconds: totalTime,
-    userAnswers: gradedAnswers,
-  };
+    questions,
+    activeExam.userAnswers || {},
+    totalTimeSeconds,
+    stableAttemptId,
+    now
+  );
 
+  // Persist attempt safely
   saveAttempt(attempt);
+
+  // Clear active exam state ONLY after successful persistence
   clearActiveExam(setNumber);
+
   return attempt;
 }
 

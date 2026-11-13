@@ -2,15 +2,63 @@ import { Question, UserAnswer } from '../types/oir';
 
 export interface EvaluationResult {
   isCorrect: boolean;
+  isExcluded?: boolean;
   userDisplayAnswer: string;
   correctDisplayAnswer: string;
+}
+
+/**
+ * Parses numeric strings including fractions (e.g. "1/2") or decimals ("0.5").
+ * Rejects non-numeric, infinity, NaN, or strings with extra text.
+ */
+export function parseNumericValue(val: string): number | null {
+  const clean = val.trim();
+  if (!clean) return null;
+
+  // Fractions e.g. "1/2", "-3/4"
+  if (clean.includes('/')) {
+    const parts = clean.split('/');
+    if (parts.length === 2) {
+      const num = Number(parts[0].trim());
+      const den = Number(parts[1].trim());
+      if (!isNaN(num) && !isNaN(den) && den !== 0 && isFinite(num) && isFinite(den)) {
+        return num / den;
+      }
+    }
+    return null;
+  }
+
+  // Plain numbers e.g. "8", "8.0", "0.5", "-4"
+  if (!/^-?\d+(\.\d+)?$/.test(clean)) {
+    return null;
+  }
+
+  const n = Number(clean);
+  if (!isNaN(n) && isFinite(n)) {
+    return n;
+  }
+  return null;
+}
+
+/**
+ * Checks if two numbers are equivalent within floating-point tolerance (1e-6).
+ */
+export function areNumbersEquivalent(userVal: string, corrVal: string): boolean {
+  const uNum = parseNumericValue(userVal);
+  const cNum = parseNumericValue(corrVal);
+
+  if (uNum !== null && cNum !== null) {
+    return Math.abs(uNum - cNum) < 1e-6;
+  }
+
+  return userVal.trim().toLowerCase() === corrVal.trim().toLowerCase();
 }
 
 /**
  * Normalizes two-part answers (letters or numbers) into [part1, part2].
  * Accepts separators like comma, 'and', space, slash, etc.
  */
-function parseTwoPart(input: unknown): [string, string] | null {
+export function parseTwoPart(input: unknown): [string, string] | null {
   if (!input) return null;
 
   if (Array.isArray(input)) {
@@ -106,6 +154,24 @@ export function evaluateAnswer(
     isAnswered = true;
   }
 
+  // Guard: if question is excluded from scoring (Set 06 Q11)
+  if (question.scoringExcluded) {
+    let userDisp = 'Not Answered';
+    if (twoPartAnswer) {
+      userDisp = `${twoPartAnswer[0]}, ${twoPartAnswer[1]}`;
+    } else if (Array.isArray(selectedOption)) {
+      userDisp = selectedOption.join(', ');
+    } else if (selectedOption !== undefined && selectedOption !== null) {
+      userDisp = String(selectedOption);
+    }
+    return {
+      isCorrect: false,
+      isExcluded: true,
+      userDisplayAnswer: userDisp,
+      correctDisplayAnswer: formatCorrectDisplay(question, correctRaw) + ' (Excluded from Scoring)',
+    };
+  }
+
   // Guard: if user did not answer
   if (!isAnswered) {
     return {
@@ -149,21 +215,11 @@ export function evaluateAnswer(
       return { isCorrect: false, userDisplayAnswer: userDisp, correctDisplayAnswer: corrDisp };
     }
 
-    const normalizeNum = (val: string) => {
-      // Handle fractions like "1/4" or decimals
-      if (val.includes('/')) {
-        const [n, d] = val.split('/').map(Number);
-        if (d) return (n / d).toString();
-      }
-      return val.replace(/\s+/g, '').toLowerCase();
-    };
+    // Strict numerical order: first part matches first part, second part matches second part
+    const isCorrect =
+      areNumbersEquivalent(userParts[0], corrParts[0]) &&
+      areNumbersEquivalent(userParts[1], corrParts[1]);
 
-    const u1 = normalizeNum(userParts[0]);
-    const u2 = normalizeNum(userParts[1]);
-    const c1 = normalizeNum(corrParts[0]);
-    const c2 = normalizeNum(corrParts[1]);
-
-    const isCorrect = (u1 === c1 && u2 === c2) || (u1 === c2 && u2 === c1);
     return { isCorrect, userDisplayAnswer: userDisp, correctDisplayAnswer: corrDisp };
   }
 

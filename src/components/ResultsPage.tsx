@@ -13,6 +13,9 @@ import {
   Award,
   Info,
   ShieldCheck,
+  AlertCircle,
+  Sparkles,
+  Target,
 } from 'lucide-react';
 import { TestAttempt } from '../types/oir';
 
@@ -38,6 +41,8 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
   hasNextSet,
 }) => {
   const pad = attempt.setNumber.toString().padStart(2, '0');
+  const maxScore = attempt.maxScore ?? (attempt.totalQuestions - (attempt.excludedQuestions ?? 0));
+  const excludedCount = attempt.excludedQuestions ?? 0;
 
   // Format time taken
   const formatTime = (seconds: number) => {
@@ -52,44 +57,44 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
   const strokeDashoffset =
     circumference - (attempt.accuracyPercentage / 100) * circumference;
 
-  // Unofficial practice benchmark based on candidate simulation
+  // Practice benchmark based on official SSB guidelines
   let benchmarkRating = 'OIR - 5';
   let benchmarkLabel = 'Below Average';
-  let benchmarkBadgeColor = 'bg-rose-500/20 text-rose-300 border-rose-500/30';
-  let benchmarkGlow = 'bg-rose-500/10';
+  let benchmarkBadgeColor = 'bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-rose-500/10';
+  let benchmarkGlow = 'bg-rose-500/15';
 
   if (attempt.accuracyPercentage >= 85) {
     benchmarkRating = 'OIR - 1';
     benchmarkLabel = 'Outstanding';
-    benchmarkBadgeColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
-    benchmarkGlow = 'bg-emerald-500/10';
+    benchmarkBadgeColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-emerald-500/10';
+    benchmarkGlow = 'bg-emerald-500/20';
   } else if (attempt.accuracyPercentage >= 75) {
     benchmarkRating = 'OIR - 2';
     benchmarkLabel = 'Excellent';
-    benchmarkBadgeColor = 'bg-teal-500/20 text-teal-300 border-teal-500/30';
-    benchmarkGlow = 'bg-teal-500/10';
+    benchmarkBadgeColor = 'bg-teal-500/20 text-teal-300 border-teal-500/40 shadow-teal-500/10';
+    benchmarkGlow = 'bg-teal-500/20';
   } else if (attempt.accuracyPercentage >= 60) {
     benchmarkRating = 'OIR - 3';
     benchmarkLabel = 'Above Average';
-    benchmarkBadgeColor = 'bg-blue-500/20 text-blue-300 border-blue-500/30';
-    benchmarkGlow = 'bg-blue-500/10';
+    benchmarkBadgeColor = 'bg-blue-500/20 text-blue-300 border-blue-500/40 shadow-blue-500/10';
+    benchmarkGlow = 'bg-blue-500/20';
   } else if (attempt.accuracyPercentage >= 50) {
     benchmarkRating = 'OIR - 4';
     benchmarkLabel = 'Average';
-    benchmarkBadgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/30';
-    benchmarkGlow = 'bg-amber-500/10';
+    benchmarkBadgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-amber-500/10';
+    benchmarkGlow = 'bg-amber-500/20';
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center py-10 px-4 sm:px-6">
+    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col justify-center py-10 px-4 sm:px-6">
       <div className="max-w-3xl mx-auto w-full space-y-6 animate-in fade-in duration-300">
         {/* Header */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-mono font-semibold text-slate-300">
-            <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-500/10 border border-blue-400/30 text-xs font-mono font-semibold text-blue-300 shadow-sm shadow-blue-500/10">
+            <ShieldCheck className="w-4 h-4 text-cyan-400" />
             <span>OFFICER INTELLIGENCE RATING (OIR) REPORT</span>
           </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+          <h1 className="text-3xl sm:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-sky-100 to-blue-200 tracking-tight">
             SET {pad} – TEST COMPLETED
           </h1>
           <p className="text-sm text-slate-400">
@@ -98,33 +103,50 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
         </div>
 
         {/* Primary Scorecard */}
-        <div className="relative bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl overflow-hidden">
+        <div className="relative bg-slate-900/90 backdrop-blur-xl border border-slate-800/80 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-blue-950/20 overflow-hidden ring-1 ring-white/5">
           {/* Background glows */}
-          <div className={`absolute -top-32 -right-32 w-64 h-64 ${benchmarkGlow} rounded-full blur-3xl pointer-events-none`} />
-          <div className="absolute -bottom-32 -left-32 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className={`absolute -top-32 -right-32 w-72 h-72 ${benchmarkGlow} rounded-full blur-3xl pointer-events-none`} />
+          <div className="absolute -bottom-32 -left-32 w-72 h-72 bg-blue-500/15 rounded-full blur-3xl pointer-events-none" />
 
           {/* Top Rating Banner */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-6 border-b border-slate-800">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-6 border-b border-slate-800/80">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-md shadow-amber-500/10">
                 <Trophy className="w-6 h-6" />
               </div>
               <div>
                 <div className="text-[11px] text-slate-400 uppercase font-semibold tracking-wider flex items-center gap-1.5">
-                  <span>Unofficial Practice Assessment Benchmark</span>
+                  <Sparkles className="w-3 h-3 text-amber-400" />
+                  <span>SSB Assessment Benchmark</span>
                 </div>
                 <div className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                  <span className="text-blue-400">{benchmarkRating}</span>
-                  <span className="text-slate-400 font-normal">({benchmarkLabel})</span>
+                  <span className="text-cyan-400 font-extrabold">{benchmarkRating}</span>
+                  <span className="text-slate-300 font-normal">({benchmarkLabel})</span>
                 </div>
               </div>
             </div>
 
-            <div className={`px-4 py-2 rounded-xl border text-xs font-bold uppercase tracking-wider ${benchmarkBadgeColor} flex items-center gap-2`}>
+            <div className={`px-4 py-2.5 rounded-xl border text-xs font-extrabold uppercase tracking-wider ${benchmarkBadgeColor} flex items-center gap-2 shadow-lg`}>
               <Award className="w-4 h-4" />
-              <span>Score: {attempt.score} / {attempt.totalQuestions}</span>
+              <span>Score: {attempt.score} / {maxScore}</span>
             </div>
           </div>
+
+          {/* Set 06 Question 11 Exclusion Alert if applicable */}
+          {excludedCount > 0 && (
+            <div className="mt-4 p-3.5 rounded-2xl bg-purple-950/40 border border-purple-800/60 text-purple-200 text-xs flex items-start gap-3">
+              <AlertCircle className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-purple-300">Scoring Exclusion Note: </span>
+                <span>
+                  Question 11 was excluded from scoring due to ambiguous options in the source reference key. Maximum score is adjusted to {maxScore}.
+                </span>
+                <span className="block mt-1 font-mono text-[11px] text-purple-300/80">
+                  Total Questions: {attempt.totalQuestions} = Correct ({attempt.correctAnswers}) + Incorrect ({attempt.incorrectAnswers}) + Unanswered ({attempt.unansweredQuestions}) + Excluded ({excludedCount})
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Central Analytics Section */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 my-6 items-center">
@@ -146,7 +168,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
                     cx="60"
                     cy="60"
                     r={radius}
-                    className="stroke-emerald-500 transition-all duration-1000 ease-out"
+                    className="stroke-cyan-400 transition-all duration-1000 ease-out"
                     strokeWidth="10"
                     strokeDasharray={circumference}
                     strokeDashoffset={strokeDashoffset}
@@ -157,58 +179,72 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
 
                 {/* Center text */}
                 <div className="absolute flex flex-col items-center justify-center text-center">
-                  <span className="text-3xl font-extrabold text-white font-mono">
+                  <span className="text-3xl font-extrabold text-white font-mono tracking-tight">
                     {attempt.accuracyPercentage}%
                   </span>
-                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
-                    Accuracy
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-cyan-300 flex items-center gap-1">
+                    <Target className="w-3 h-3" /> Accuracy
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Metrics Breakdown (Correct, Incorrect, Unanswered) */}
-            <div className="col-span-1 md:col-span-2 grid grid-cols-3 gap-3">
+            {/* Metrics Breakdown (Correct, Incorrect, Unanswered, Excluded) */}
+            <div className={`col-span-1 md:col-span-2 grid ${excludedCount > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'} gap-2.5 sm:gap-3`}>
               {/* Correct */}
-              <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-800/50 flex flex-col items-center text-center">
-                <CheckCircle2 className="w-6 h-6 text-emerald-400 mb-1" />
-                <span className="text-xs text-emerald-300/80 font-medium">Correct</span>
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-emerald-950/40 border border-emerald-700/50 flex flex-col items-center text-center shadow-sm">
+                <CheckCircle2 className="w-5 sm:w-6 h-5 sm:h-6 text-emerald-400 mb-1" />
+                <span className="text-[11px] sm:text-xs text-emerald-300/90 font-medium">Correct</span>
                 <span className="text-2xl font-extrabold text-emerald-400 font-mono mt-1">
                   {attempt.correctAnswers}
                 </span>
-                <span className="text-[10px] text-emerald-400/60 font-mono mt-0.5">
+                <span className="text-[10px] text-emerald-400/70 font-mono mt-0.5">
                   +{attempt.correctAnswers} Marks
                 </span>
               </div>
 
               {/* Incorrect */}
-              <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-800/50 flex flex-col items-center text-center">
-                <XCircle className="w-6 h-6 text-rose-400 mb-1" />
-                <span className="text-xs text-rose-300/80 font-medium">Incorrect</span>
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-rose-950/40 border border-rose-700/50 flex flex-col items-center text-center shadow-sm">
+                <XCircle className="w-5 sm:w-6 h-5 sm:h-6 text-rose-400 mb-1" />
+                <span className="text-[11px] sm:text-xs text-rose-300/90 font-medium">Incorrect</span>
                 <span className="text-2xl font-extrabold text-rose-400 font-mono mt-1">
                   {attempt.incorrectAnswers}
                 </span>
-                <span className="text-[10px] text-rose-400/60 font-mono mt-0.5">
+                <span className="text-[10px] text-rose-400/70 font-mono mt-0.5">
                   0 Negative
                 </span>
               </div>
 
               {/* Unanswered */}
-              <div className="p-4 rounded-2xl bg-amber-950/40 border border-amber-800/50 flex flex-col items-center text-center">
-                <HelpCircle className="w-6 h-6 text-amber-400 mb-1" />
-                <span className="text-xs text-amber-300/80 font-medium">Unanswered</span>
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-950/40 border border-amber-700/50 flex flex-col items-center text-center shadow-sm">
+                <HelpCircle className="w-5 sm:w-6 h-5 sm:h-6 text-amber-400 mb-1" />
+                <span className="text-[11px] sm:text-xs text-amber-300/90 font-medium">Unanswered</span>
                 <span className="text-2xl font-extrabold text-amber-400 font-mono mt-1">
                   {attempt.unansweredQuestions}
                 </span>
-                <span className="text-[10px] text-amber-400/60 font-mono mt-0.5">
+                <span className="text-[10px] text-amber-400/70 font-mono mt-0.5">
                   Skipped / Expired
                 </span>
               </div>
 
-              {/* Time Taken */}
-              <div className="col-span-3 p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-between text-xs font-medium">
+              {/* Excluded (if any) */}
+              {excludedCount > 0 && (
+                <div className="p-3.5 sm:p-4 rounded-2xl bg-purple-950/40 border border-purple-700/50 flex flex-col items-center text-center shadow-sm">
+                  <AlertCircle className="w-5 sm:w-6 h-5 sm:h-6 text-purple-400 mb-1" />
+                  <span className="text-[11px] sm:text-xs text-purple-300/90 font-medium">Excluded</span>
+                  <span className="text-2xl font-extrabold text-purple-400 font-mono mt-1">
+                    {excludedCount}
+                  </span>
+                  <span className="text-[10px] text-purple-400/70 font-mono mt-0.5">
+                    Not Scored
+                  </span>
+                </div>
+              )}
+
+              {/* Time Taken Row */}
+              <div className={`${excludedCount > 0 ? 'col-span-2 sm:col-span-4' : 'col-span-3'} p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/70 flex items-center justify-between text-xs font-medium`}>
                 <div className="flex items-center gap-2 text-slate-300">
-                  <Clock className="w-4 h-4 text-blue-400" />
+                  <Clock className="w-4 h-4 text-cyan-400" />
                   <span>Time Consumed:</span>
                   <strong className="text-white font-mono text-sm">
                     {formatTime(attempt.timeTakenSeconds)}
@@ -231,28 +267,28 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
               <span>Official SSB OIR Rating Scale (Reference – Test Booklet Page 7)</span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs">
-              <div className="p-2 rounded-lg bg-emerald-950/30 border border-emerald-900/40">
+              <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-800/50 shadow-sm">
                 <div className="font-bold text-emerald-300 font-mono">OIR - 1</div>
-                <div className="text-[11px] text-slate-400">Outstanding</div>
+                <div className="text-[11px] text-slate-300">Outstanding</div>
               </div>
-              <div className="p-2 rounded-lg bg-teal-950/30 border border-teal-900/40">
+              <div className="p-2.5 rounded-xl bg-teal-950/40 border border-teal-800/50 shadow-sm">
                 <div className="font-bold text-teal-300 font-mono">OIR - 2</div>
-                <div className="text-[11px] text-slate-400">Excellent</div>
+                <div className="text-[11px] text-slate-300">Excellent</div>
               </div>
-              <div className="p-2 rounded-lg bg-blue-950/30 border border-blue-900/40">
+              <div className="p-2.5 rounded-xl bg-blue-950/40 border border-blue-800/50 shadow-sm">
                 <div className="font-bold text-blue-300 font-mono">OIR - 3</div>
-                <div className="text-[11px] text-slate-400">Above Average</div>
+                <div className="text-[11px] text-slate-300">Above Average</div>
               </div>
-              <div className="p-2 rounded-lg bg-amber-950/30 border border-amber-900/40">
+              <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-800/50 shadow-sm">
                 <div className="font-bold text-amber-300 font-mono">OIR - 4</div>
-                <div className="text-[11px] text-slate-400">Average</div>
+                <div className="text-[11px] text-slate-300">Average</div>
               </div>
-              <div className="p-2 rounded-lg bg-rose-950/30 border border-rose-900/40 col-span-2 sm:col-span-1">
+              <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-800/50 col-span-2 sm:col-span-1 shadow-sm">
                 <div className="font-bold text-rose-300 font-mono">OIR - 5</div>
-                <div className="text-[11px] text-slate-400">Below Average</div>
+                <div className="text-[11px] text-slate-300">Below Average</div>
               </div>
             </div>
-            <p className="text-[11px] text-slate-500 leading-relaxed italic">
+            <p className="text-[11px] text-slate-400 leading-relaxed italic">
               * Note: The Services Selection Board (SSB) does not publish rigid percentage cutoffs. Assessment relies on relative grading determined by the assessor board based on overall batch performance. Percentage-based bands presented above are unofficial practice assessment benchmarks to guide your preparation pace.
             </p>
           </div>
@@ -263,7 +299,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
               {/* 1. View Solutions */}
               <button
                 onClick={onViewSolutions}
-                className="flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-blue-600/30 transition cursor-pointer"
+                className="flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs shadow-lg shadow-blue-600/30 transition cursor-pointer"
               >
                 <BookOpen className="w-4 h-4" />
                 <span>View All Solutions</span>
@@ -272,7 +308,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
               {/* 2. Attempt Again */}
               <button
                 onClick={onAttemptAgain}
-                className="flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 font-bold text-xs transition cursor-pointer"
+                className="flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700/80 font-bold text-xs transition cursor-pointer shadow-sm"
               >
                 <RotateCcw className="w-4 h-4 text-amber-400" />
                 <span>Attempt Again</span>
@@ -281,9 +317,9 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
               {/* 3. Return to Dashboard */}
               <button
                 onClick={onGoDashboard}
-                className="flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 font-bold text-xs transition cursor-pointer"
+                className="flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700/80 font-bold text-xs transition cursor-pointer shadow-sm"
               >
-                <LayoutDashboard className="w-4 h-4 text-blue-400" />
+                <LayoutDashboard className="w-4 h-4 text-cyan-400" />
                 <span>Dashboard</span>
               </button>
             </div>
@@ -295,7 +331,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
                 disabled={!hasPreviousSet}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition cursor-pointer ${
                   hasPreviousSet
-                    ? 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white'
+                    ? 'bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white'
                     : 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
                 }`}
               >
@@ -303,7 +339,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
                 <span>Previous Set</span>
               </button>
 
-              <span className="text-xs text-slate-500 font-mono">
+              <span className="text-xs text-slate-400 font-mono font-semibold">
                 Set {pad} of 20
               </span>
 
@@ -312,7 +348,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
                 disabled={!hasNextSet}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition cursor-pointer ${
                   hasNextSet
-                    ? 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white'
+                    ? 'bg-slate-800/90 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white'
                     : 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
                 }`}
               >

@@ -1457,7 +1457,8 @@
     "options": [],
     "dropdownGroups": [],
     "correctAnswer": "8 and 16",
-    "explanation": "",
+    "explanation": "The original reference booklet provides the correct answer but does not include a written explanation for this question.",
+    "hasMissingSourceExplanation": true,
     "solutionImages": [],
     "pdfPage": 126
   },

@@ -25,7 +25,12 @@ import {
   clearActiveExam,
   saveAttempt,
 } from '../utils/storage';
-import { evaluateAnswer } from '../utils/evaluator';
+import { buildTestAttempt } from '../utils/scoring';
+import {
+  calculateQuestionRemaining,
+  restoreQuestionTimerOnResume,
+  switchQuestionTimer,
+} from '../utils/timerUtils';
 
 interface ExamInterfaceProps {
   setNumber: number;
@@ -48,9 +53,10 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
   const isSubmittingRef = useRef<boolean>(false);
 
   // Active question index (0 to 49)
-  const [currentIndex, setCurrentIndex] = useState<number>(() => {
-    return initialState ? Math.min(totalQuestions - 1, Math.max(0, initialState.currentQuestionIndex)) : 0;
-  });
+  const initialIndex = initialState
+    ? Math.min(totalQuestions - 1, Math.max(0, initialState.currentQuestionIndex))
+    : 0;
+  const [currentIndex, setCurrentIndex] = useState<number>(initialIndex);
 
   // User answers map
   const [userAnswers, setUserAnswers] = useState<Record<number, UserAnswer>>(() => {
@@ -78,37 +84,40 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
     return Date.now() + settings.totalDurationMinutes * 60 * 1000;
   });
 
-  // TASK 6: Persistent question timers map
-  const [questionTimeLeft, setQuestionTimeLeft] = useState<Record<number, number>>(() => {
-    if (initialState?.questionTimeLeft) {
-      return initialState.questionTimeLeft;
-    }
-    const map: Record<number, number> = {};
-    for (let q = 1; q <= 50; q++) {
-      map[q] = settings.questionTimeSeconds;
-    }
-    return map;
-  });
+  // TASK 1: Restore question timer state properly on mount / refresh
+  const initialCurQ = questions[initialIndex]?.questionNumber || 1;
+  const initialRestoration = restoreQuestionTimerOnResume(
+    initialCurQ,
+    initialState?.questionTimeLeft || {},
+    initialState?.currentQuestionStartedAt || Date.now(),
+    initialState?.questionExpiredMap || {},
+    settings.questionTimeSeconds,
+    Date.now()
+  );
+
+  // Persistent question timers map
+  const [questionTimeLeft, setQuestionTimeLeft] = useState<Record<number, number>>(
+    initialRestoration.updatedTimeLeft
+  );
 
   // Questions whose timer has expired (time ran out)
-  const [questionExpiredMap, setQuestionExpiredMap] = useState<Record<number, boolean>>(() => {
-    return initialState?.questionExpiredMap || {};
-  });
+  const [questionExpiredMap, setQuestionExpiredMap] = useState<Record<number, boolean>>(
+    initialRestoration.updatedExpiredMap
+  );
 
   // Timestamp when the currently active question started
-  const [currentQuestionStartedAt, setCurrentQuestionStartedAt] = useState<number>(() => {
-    return Date.now();
-  });
+  const [currentQuestionStartedAt, setCurrentQuestionStartedAt] = useState<number>(
+    initialRestoration.newStartedAt
+  );
 
   // Live countdown displays
   const [overallRemaining, setOverallRemaining] = useState<number>(() => {
     return Math.max(0, Math.floor((examEndTime - Date.now()) / 1000));
   });
 
-  const [activeQuestionRemaining, setActiveQuestionRemaining] = useState<number>(() => {
-    const curQ = questions[initialState ? initialState.currentQuestionIndex : 0]?.questionNumber || 1;
-    return questionTimeLeft[curQ] ?? settings.questionTimeSeconds;
-  });
+  const [activeQuestionRemaining, setActiveQuestionRemaining] = useState<number>(
+    initialRestoration.remainingSeconds
+  );
 
   // Image zoom modal
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
@@ -127,39 +136,11 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
     isAnswered: false,
   };
 
-  // ----------------- SUBMISSION LOGIC -----------------
+  // ----------------- SUBMISSION LOGIC (TASK 4 & TASK 6) -----------------
   const submitExam = useCallback(
     (reason: 'manual' | 'overall_timer_expired' = 'manual') => {
       if (isSubmittingRef.current) return;
       isSubmittingRef.current = true;
-
-      let correctCount = 0;
-      let incorrectCount = 0;
-      let unansweredCount = 0;
-
-      const gradedAnswers: Record<number, UserAnswer> = {};
-
-      questions.forEach((q) => {
-        const uAns = userAnswers[q.questionNumber];
-        if (!uAns || !uAns.isAnswered) {
-          unansweredCount++;
-          gradedAnswers[q.questionNumber] = {
-            questionNumber: q.questionNumber,
-            selectedOption: undefined,
-            isAnswered: false,
-            isCorrect: false,
-          };
-        } else {
-          const evalRes = evaluateAnswer(q, uAns);
-          if (evalRes.isCorrect) {
-            correctCount++;
-            gradedAnswers[q.questionNumber] = { ...uAns, isCorrect: true };
-          } else {
-            incorrectCount++;
-            gradedAnswers[q.questionNumber] = { ...uAns, isCorrect: false };
-          }
-        }
-      });
 
       const totalTimeLimitSeconds = settings.totalDurationMinutes * 60;
       const timeTaken = Math.min(
@@ -167,28 +148,26 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
         Math.max(1, totalTimeLimitSeconds - overallRemaining)
       );
 
-      const attempt: TestAttempt = {
-        attemptId: `att_${setNumber}_${Date.now()}`,
+      const examSessionStart = examEndTime - totalTimeLimitSeconds * 1000;
+      const stableAttemptId = `att_${setNumber}_${examSessionStart}`;
+
+      const attempt = buildTestAttempt(
         setNumber,
-        timestamp: Date.now(),
-        totalQuestions,
-        correctAnswers: correctCount,
-        incorrectAnswers: incorrectCount,
-        unansweredQuestions: unansweredCount,
-        score: correctCount,
-        accuracyPercentage: totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0,
-        timeTakenSeconds: timeTaken,
-        userAnswers: gradedAnswers,
-      };
+        questions,
+        userAnswers,
+        timeTaken,
+        stableAttemptId,
+        Date.now()
+      );
 
       saveAttempt(attempt);
       clearActiveExam(setNumber);
       onFinish(attempt);
     },
-    [questions, userAnswers, setNumber, settings, overallRemaining, totalQuestions, onFinish]
+    [questions, userAnswers, setNumber, settings, overallRemaining, examEndTime, onFinish]
   );
 
-  // ----------------- NAVIGATION (TASK 6) -----------------
+  // ----------------- NAVIGATION (TASK 1 & TASK 6) -----------------
   const switchQuestion = useCallback(
     (targetIndex: number) => {
       if (targetIndex < 0 || targetIndex >= totalQuestions) return;
@@ -197,31 +176,21 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
       const fromQ = questions[currentIndex].questionNumber;
       const toQ = questions[targetIndex].questionNumber;
 
-      // 1. Calculate elapsed time on current question and deduct
-      const elapsed = Math.max(0, (now - currentQuestionStartedAt) / 1000);
-      const remainingOnFrom = Math.max(0, (questionTimeLeft[fromQ] ?? settings.questionTimeSeconds) - elapsed);
+      const result = switchQuestionTimer(
+        fromQ,
+        currentQuestionStartedAt,
+        toQ,
+        questionTimeLeft,
+        questionExpiredMap,
+        settings.questionTimeSeconds,
+        now
+      );
 
-      const updatedTimeLeft = {
-        ...questionTimeLeft,
-        [fromQ]: remainingOnFrom,
-      };
-
-      const updatedExpiredMap = {
-        ...questionExpiredMap,
-      };
-      if (remainingOnFrom <= 0) {
-        updatedExpiredMap[fromQ] = true;
-      }
-
-      setQuestionTimeLeft(updatedTimeLeft);
-      setQuestionExpiredMap(updatedExpiredMap);
-
-      // 2. Transition to destination question
+      setQuestionTimeLeft(result.updatedTimeLeft);
+      setQuestionExpiredMap(result.updatedExpiredMap);
       setCurrentIndex(targetIndex);
-      setCurrentQuestionStartedAt(now);
-
-      const toQTimeLeft = updatedTimeLeft[toQ] ?? settings.questionTimeSeconds;
-      setActiveQuestionRemaining(Math.round(toQTimeLeft));
+      setCurrentQuestionStartedAt(result.newStartedAt);
+      setActiveQuestionRemaining(result.toQRemaining);
     },
     [currentIndex, questions, totalQuestions, currentQuestionStartedAt, questionTimeLeft, questionExpiredMap, settings.questionTimeSeconds]
   );
@@ -359,14 +328,17 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
         return;
       }
 
-      // 2. Active Question Timer
+      // 2. Active Question Timer (Task 1)
       if (!questionExpiredMap[curQNum]) {
-        const elapsedOnCur = (now - currentQuestionStartedAt) / 1000;
-        const remaining = Math.max(0, (questionTimeLeft[curQNum] ?? settings.questionTimeSeconds) - elapsedOnCur);
-        const remainingInt = Math.ceil(remaining);
-        setActiveQuestionRemaining(remainingInt);
+        const budget = questionTimeLeft[curQNum] ?? settings.questionTimeSeconds;
+        const { remainingSeconds, isExpired } = calculateQuestionRemaining(
+          currentQuestionStartedAt,
+          budget,
+          now
+        );
+        setActiveQuestionRemaining(remainingSeconds);
 
-        if (remaining <= 0) {
+        if (isExpired) {
           // Question expired!
           setQuestionExpiredMap((prev) => ({ ...prev, [curQNum]: true }));
           setQuestionTimeLeft((prev) => ({ ...prev, [curQNum]: 0 }));
@@ -516,12 +488,17 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
               </span>
             </div>
 
-            {/* Flag Set 06 Q11 discrepancy note (Task 8) */}
+            {/* Flag Set 06 Q11 discrepancy note (Task 4 & Task 8) */}
             {currentQuestion.hasSourceDiscrepancy && (
               <div className="p-3 rounded-xl bg-amber-950/50 border border-amber-800/60 text-amber-300 text-xs flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                 <div>
                   <strong>Source Discrepancy Flagged:</strong> {currentQuestion.sourceDiscrepancyNote}
+                  {currentQuestion.scoringExcluded && (
+                    <span className="block mt-1 text-amber-200 font-semibold">
+                      This question is excluded from scoring so you will not be penalized.
+                    </span>
+                  )}
                 </div>
               </div>
             )}

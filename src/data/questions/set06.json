@@ -332,6 +332,8 @@
     "solutionImages": [],
     "pdfPage": 77,
     "hasSourceDiscrepancy": true,
+    "scoringExcluded": true,
+    "scoringExclusionReason": "Question statement ('Breeze is to Gusty as Stroll is to...') and official answer key ('The rearranged word is ANIMALS...') have an apparent source discrepancy in the original test booklet. Excluded from scoring so candidates are not arbitrarily penalized.",
     "sourceDiscrepancyNote": "Note: In the original publication, Set 06 Q11 question statement is an analogy ('Breeze is to Gusty as Stroll is to...'), whereas the published answer key provides an answer for an anagram ('ANIMALS' -> 'N'). Flagged for manual verification per source data."
   },
   {

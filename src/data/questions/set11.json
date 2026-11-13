@@ -1453,7 +1453,8 @@
     "options": [],
     "dropdownGroups": [],
     "correctAnswer": "54 and 46",
-    "explanation": "",
+    "explanation": "The original reference booklet provides the correct answer but does not include a written explanation for this question.",
+    "hasMissingSourceExplanation": true,
     "solutionImages": [],
     "pdfPage": 139
   },

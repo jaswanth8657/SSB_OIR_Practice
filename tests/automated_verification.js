@@ -78,18 +78,23 @@ function evaluateQuestion(q, selectedOption, twoPartAnswer, dropdownSelection) {
     const userParts = twoPartAnswer || parseTwoPart(selectedOption);
     const corrParts = parseTwoPart(correctRaw);
     if (!userParts || !corrParts) return { isCorrect: false };
-    const normalizeNum = (val) => {
-      if (val.includes('/')) {
-        const [n, d] = val.split('/').map(Number);
-        if (d) return (n / d).toString();
+    const parseNum = (val) => {
+      const s = String(val).trim();
+      if (s.includes('/')) {
+        const [n, d] = s.split('/').map(Number);
+        if (d) return n / d;
       }
-      return val.replace(/\s+/g, '').toLowerCase();
+      const num = parseFloat(s);
+      return isNaN(num) ? null : num;
     };
-    const u1 = normalizeNum(userParts[0]);
-    const u2 = normalizeNum(userParts[1]);
-    const c1 = normalizeNum(corrParts[0]);
-    const c2 = normalizeNum(corrParts[1]);
-    return { isCorrect: (u1 === c1 && u2 === c2) || (u1 === c2 && u2 === c1) };
+    const areEquivalent = (a, b) => {
+      const na = parseNum(a);
+      const nb = parseNum(b);
+      if (na !== null && nb !== null) return Math.abs(na - nb) < 1e-6;
+      return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+    };
+    // Strict order matching: u1 must match c1, and u2 must match c2
+    return { isCorrect: areEquivalent(userParts[0], corrParts[0]) && areEquivalent(userParts[1], corrParts[1]) };
   }
 
   // 3. Multi-Dropdown Sentence Completion
@@ -176,8 +181,9 @@ assert('Letter Series: Wrong letters rejected', !evaluateQuestion(qLetter, null,
 const qNumber = { type: 'two_part_number', correctAnswer: '8 and 13' };
 assert('Number Series: Exact two-part match', evaluateQuestion(qNumber, null, ['8', '13']).isCorrect);
 assert('Number Series: String with comma', evaluateQuestion(qNumber, '8, 13').isCorrect);
-assert('Number Series: Permuted order accepted for pair', evaluateQuestion(qNumber, null, ['13', '8']).isCorrect);
-assert('Number Series: Fractions supported', evaluateQuestion({ type: 'two_part_number', correctAnswer: '1/4 and 1/2' }, null, ['1/4', '1/2']).isCorrect);
+assert('Number Series: Reversed order strictly rejected', !evaluateQuestion(qNumber, null, ['13', '8']).isCorrect);
+assert('Number Series: Fractions supported (1/4 and 1/2)', evaluateQuestion({ type: 'two_part_number', correctAnswer: '1/4 and 1/2' }, null, ['1/4', '1/2']).isCorrect);
+assert('Number Series: Decimal to fraction equivalence (0.25 and 0.5 matches 1/4 and 1/2)', evaluateQuestion({ type: 'two_part_number', correctAnswer: '1/4 and 1/2' }, null, ['0.25', '0.5']).isCorrect);
 assert('Number Series: Incomplete answer rejected', !evaluateQuestion(qNumber, null, ['8', '']).isCorrect);
 assert('Number Series: Wrong number rejected', !evaluateQuestion(qNumber, null, ['8', '14']).isCorrect);
 
@@ -358,6 +364,12 @@ for (let s = 1; s <= 20; s++) {
     });
     if (q.hasSourceDiscrepancy) {
       totalDiscrepancies++;
+    }
+    if (s === 6 && q.questionNumber === 11) {
+      assert('Set 06 Q11 has scoringExcluded set to true', q.scoringExcluded === true);
+    }
+    if ((s === 10 || s === 11) && q.questionNumber === 45) {
+      assert(`Set ${pad} Q45 has hasMissingSourceExplanation set to true`, q.hasMissingSourceExplanation === true);
     }
   });
 }

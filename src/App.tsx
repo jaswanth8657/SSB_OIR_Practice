@@ -73,19 +73,28 @@ export const App: React.FC = () => {
     setOverallStats(getOverallStats());
   };
 
-  // Check for any expired exams on mount and recover them
+  // Check for any expired exams on mount, recover them, and automatically display Results (Task 3)
   useEffect(() => {
-    let recoveredAny = false;
+    const recoveredList: TestAttempt[] = [];
     for (let s = 1; s <= 20; s++) {
       const active = getActiveExam(s);
       if (active && active.examEndTime <= Date.now()) {
         const qList = getQuestionsForSet(s);
-        checkAndRecoverExpiredExam(s, qList, settings);
-        recoveredAny = true;
+        const recovered = checkAndRecoverExpiredExam(s, qList, settings);
+        if (recovered) {
+          recoveredList.push(recovered);
+        }
       }
     }
-    if (recoveredAny) {
+    if (recoveredList.length > 0) {
       refreshUserData();
+      // Sort to present the most recently expired test first while retaining all in history
+      recoveredList.sort((a, b) => b.timestamp - a.timestamp);
+      const latest = recoveredList[0];
+      setActiveSetNumber(latest.setNumber);
+      setActiveQuestions(getQuestionsForSet(latest.setNumber));
+      setActiveAttempt(latest);
+      setCurrentView('results');
     }
   }, [settings]);
 

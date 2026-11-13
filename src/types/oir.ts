@@ -34,6 +34,9 @@ export interface Question {
   solutionImages?: string[];
   hasSourceDiscrepancy?: boolean;
   sourceDiscrepancyNote?: string;
+  scoringExcluded?: boolean;
+  scoringExclusionReason?: string;
+  hasMissingSourceExplanation?: boolean;
   pdfPage?: number;
 }
 
@@ -53,6 +56,7 @@ export interface UserAnswer {
   dropdownSelection?: string[]; // [Line 1 ID, Line 2 ID, Line 3 ID] for Q18
   isAnswered: boolean;
   isCorrect?: boolean;
+  isExcluded?: boolean;
   timeSpentSeconds?: number;
 }
 
@@ -61,9 +65,11 @@ export interface TestAttempt {
   setNumber: number;
   timestamp: number;
   totalQuestions: number;
+  maxScore: number;
   correctAnswers: number;
   incorrectAnswers: number;
   unansweredQuestions: number;
+  excludedQuestions: number;
   score: number;
   accuracyPercentage: number;
   timeTakenSeconds: number;
