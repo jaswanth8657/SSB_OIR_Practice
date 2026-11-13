@@ -54,11 +54,89 @@ export function resetUserSettings(): UserSettings {
 
 // ----------------- ATTEMPTS & PROGRESS -----------------
 
+export interface SaveAttemptResult {
+  success: boolean;
+  error?: string;
+  attemptId?: string;
+}
+
+/**
+ * Task 4: Normalize legacy attempt records to ensure full compatibility
+ * with Set 06 Q11 scoring exclusion and the new maxScore/excludedQuestions schema.
+ */
+export function normalizeLegacyAttempt(att: TestAttempt): TestAttempt {
+  if (!att) return att;
+
+  // Set 06 normalization
+  if (att.setNumber === 6) {
+    const isAlreadyNormalized = att.maxScore === 49 && att.excludedQuestions === 1;
+    if (isAlreadyNormalized) return att;
+
+    let newCorrect = att.correctAnswers ?? att.score ?? 0;
+    let newIncorrect = att.incorrectAnswers ?? 0;
+    let newUnanswered = att.unansweredQuestions ?? 0;
+    const newAnswers = att.userAnswers ? { ...att.userAnswers } : {};
+
+    // Check if Q11 is in userAnswers
+    if (newAnswers[11]) {
+      const q11 = newAnswers[11];
+      if (q11.isCorrect) {
+        newCorrect = Math.max(0, newCorrect - 1);
+      } else if (q11.isAnswered) {
+        newIncorrect = Math.max(0, newIncorrect - 1);
+      } else {
+        newUnanswered = Math.max(0, newUnanswered - 1);
+      }
+      newAnswers[11] = {
+        ...q11,
+        isCorrect: false,
+        isExcluded: true,
+      };
+    } else {
+      // If Q11 is not specifically detailed in userAnswers, safely adjust from incorrect/unanswered
+      if (newUnanswered > 0) {
+        newUnanswered--;
+      } else if (newIncorrect > 0) {
+        newIncorrect--;
+      }
+    }
+
+    const answeredScored = newCorrect + newIncorrect;
+    const accuracy = answeredScored > 0 ? Math.round((newCorrect / answeredScored) * 100) : 0;
+
+    return {
+      ...att,
+      maxScore: 49,
+      excludedQuestions: 1,
+      correctAnswers: newCorrect,
+      incorrectAnswers: newIncorrect,
+      unansweredQuestions: newUnanswered,
+      score: newCorrect,
+      accuracyPercentage: accuracy,
+      userAnswers: newAnswers,
+    };
+  }
+
+  // Non-Set 06 sets
+  if (att.maxScore === undefined || att.excludedQuestions === undefined) {
+    const totalQ = att.totalQuestions || 50;
+    return {
+      ...att,
+      maxScore: totalQ,
+      excludedQuestions: 0,
+      totalQuestions: totalQ,
+    };
+  }
+
+  return att;
+}
+
 export function getAllAttempts(): TestAttempt[] {
   try {
     const raw = localStorage.getItem(ATTEMPTS_KEY);
     if (!raw) return [];
-    return JSON.parse(raw);
+    const list: TestAttempt[] = JSON.parse(raw);
+    return list.map(normalizeLegacyAttempt);
   } catch {
     return [];
   }
@@ -68,7 +146,7 @@ export function getAttemptsForSet(setNumber: number): TestAttempt[] {
   return getAllAttempts().filter((a) => a.setNumber === setNumber);
 }
 
-export function saveAttempt(attempt: TestAttempt): void {
+export function saveAttempt(attempt: TestAttempt): SaveAttemptResult {
   try {
     const raw = localStorage.getItem(ATTEMPTS_KEY);
     const all: TestAttempt[] = raw ? JSON.parse(raw) : [];
@@ -79,35 +157,64 @@ export function saveAttempt(attempt: TestAttempt): void {
       all.push(attempt);
       localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(all));
     }
-  } catch (err) {
+
+    // Verify write actually persisted to storage
+    const verifyRaw = localStorage.getItem(ATTEMPTS_KEY);
+    if (!verifyRaw) {
+      return { success: false, error: 'Storage verification failed: ATTEMPTS_KEY empty' };
+    }
+    const verifyList: TestAttempt[] = JSON.parse(verifyRaw);
+    const inHistory = verifyList.some((a) => a.attemptId === attempt.attemptId);
+    if (!inHistory) {
+      return { success: false, error: 'Verification failed: attemptId not found in history' };
+    }
+
+    return { success: true, attemptId: attempt.attemptId };
+  } catch (err: unknown) {
     console.error('Failed to save test attempt:', err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Storage write failed',
+    };
   }
 }
 
+/**
+ * Task 5: Fix Dashboard Status During Retakes
+ * Active exam takes priority for display status ('in_progress') while
+ * preserving completed attempts count, bestScore, and lastAttemptTimestamp!
+ */
 export function getSetProgress(setNumber: number): SetProgress {
   const attempts = getAttemptsForSet(setNumber);
   const activeExam = getActiveExam(setNumber);
 
-  if (attempts.length > 0) {
-    const bestScore = Math.max(...attempts.map((a) => a.score));
-    const lastAttempt = attempts[attempts.length - 1];
+  const hasPreviousAttempts = attempts.length > 0;
+  const bestScore = hasPreviousAttempts ? Math.max(...attempts.map((a) => a.score)) : undefined;
+  const lastAttempt = hasPreviousAttempts ? attempts[attempts.length - 1] : undefined;
+
+  // If there is an active exam currently in progress:
+  if (activeExam) {
+    return {
+      setNumber,
+      status: 'in_progress',
+      attemptsCount: attempts.length,
+      bestScore,
+      lastAttemptTimestamp: lastAttempt?.timestamp,
+    };
+  }
+
+  // If completed with no active retake in progress:
+  if (hasPreviousAttempts) {
     return {
       setNumber,
       status: 'completed',
       attemptsCount: attempts.length,
       bestScore,
-      lastAttemptTimestamp: lastAttempt.timestamp,
+      lastAttemptTimestamp: lastAttempt?.timestamp,
     };
   }
 
-  if (activeExam) {
-    return {
-      setNumber,
-      status: 'in_progress',
-      attemptsCount: 0,
-    };
-  }
-
+  // Not started yet
   return {
     setNumber,
     status: 'not_started',
@@ -208,10 +315,59 @@ export function clearActiveExam(setNumber: number): void {
   }
 }
 
+// ----------------- CROSS-TAB RECOVERY COORDINATION (TASK 2) -----------------
+
+const LOCK_KEY_PREFIX = 'oir_recovery_lock_';
+const LOCK_TIMEOUT_MS = 5000; // 5-second automatic expiration prevents stale locks
+
+export function acquireRecoveryLock(setNumber: number, ownerId: string): boolean {
+  try {
+    const key = `${LOCK_KEY_PREFIX}${setNumber}`;
+    const raw = localStorage.getItem(key);
+    const now = Date.now();
+    if (raw) {
+      try {
+        const lock = JSON.parse(raw);
+        if (lock.expiresAt > now && lock.owner !== ownerId) {
+          // Lock is actively held by another tab/process
+          return false;
+        }
+      } catch {
+        // Corrupted lock payload, safe to overwrite
+      }
+    }
+    localStorage.setItem(
+      key,
+      JSON.stringify({ owner: ownerId, expiresAt: now + LOCK_TIMEOUT_MS })
+    );
+    return true;
+  } catch {
+    return true; // Fallback to idempotent history check if localStorage lock throws
+  }
+}
+
+export function releaseRecoveryLock(setNumber: number, ownerId: string): void {
+  try {
+    const key = `${LOCK_KEY_PREFIX}${setNumber}`;
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const lock = JSON.parse(raw);
+      if (lock.owner === ownerId) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // Ignore
+  }
+}
+
 /**
- * Task 3 & Task 6 & Task 7: Expired Exam Recovery
- * If overall exam timer has expired, evaluates saved answers using the shared scoring engine,
- * records the completed attempt with a stable deterministic attemptId, and safely clears active state.
+ * Task 2 & Task 3: Reliable Expired Exam Recovery with Cross-Tab Coordination.
+ * - Idempotently checks if the attempt is already in permanent history.
+ * - Coordinates via cross-tab locks to prevent duplicate submissions between concurrent tabs.
+ * - Preserves original exam deadline (activeExam.examEndTime) as attempt timestamp.
+ * - Clears active exam ONLY after successful, verified persistence to permanent storage.
+ * - If persistence fails, active exam is retained and null is returned.
  */
 export function checkAndRecoverExpiredExam(
   setNumber: number,
@@ -219,7 +375,22 @@ export function checkAndRecoverExpiredExam(
   settings: UserSettings
 ): TestAttempt | null {
   const activeExam = getActiveExam(setNumber);
-  if (!activeExam) return null;
+  if (!activeExam) {
+    // Cross-tab check: if another tab already recovered this set recently, retrieve it from history
+    try {
+      const recentRaw = localStorage.getItem(`oir_recent_recovery_${setNumber}`);
+      if (recentRaw) {
+        const { attemptId, expiresAt } = JSON.parse(recentRaw);
+        if (expiresAt > Date.now()) {
+          const match = getAllAttempts().find((a) => a.attemptId === attemptId);
+          if (match) return match;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return null;
+  }
 
   const now = Date.now();
   // Check if overall timer expired
@@ -228,43 +399,102 @@ export function checkAndRecoverExpiredExam(
   }
 
   // Derive stable deterministic attempt ID from the examination session
-  const examSessionStart = activeExam.examStartTime || (activeExam.examEndTime - settings.totalDurationMinutes * 60 * 1000);
+  const totalDurationMs = settings.totalDurationMinutes * 60 * 1000;
+  const examSessionStart = activeExam.examStartTime || (activeExam.examEndTime - totalDurationMs);
   const stableAttemptId = `att_${setNumber}_${examSessionStart}`;
 
-  // Check if this attempt was already recorded in history
+  // Multi-tab coordination: check if already recovered by another tab
   const allAttempts = getAllAttempts();
   const existingAttempt = allAttempts.find((a) => a.attemptId === stableAttemptId);
   if (existingAttempt) {
-    // Already saved; clean up residual active exam and return the existing attempt
     clearActiveExam(setNumber);
+    try {
+      localStorage.setItem(
+        `oir_recent_recovery_${setNumber}`,
+        JSON.stringify({ attemptId: stableAttemptId, expiresAt: Date.now() + 30000 })
+      );
+    } catch {
+      // Ignore
+    }
     return existingAttempt;
   }
 
-  // Calculate total test time
-  const totalTimeSeconds = settings.totalDurationMinutes * 60;
+  // Cross-tab lock to prevent race condition between concurrent tabs
+  const ownerId = `tab_${now}_${Math.random().toString(36).substring(2, 9)}`;
+  const lockAcquired = acquireRecoveryLock(setNumber, ownerId);
+  if (!lockAcquired) {
+    // Another tab is currently recovering this exam; check if history already has it
+    const recheck = getAllAttempts().find((a) => a.attemptId === stableAttemptId);
+    if (recheck) {
+      clearActiveExam(setNumber);
+      return recheck;
+    }
+    return null;
+  }
 
-  // Grade using shared production scoring engine
-  const attempt = buildTestAttempt(
-    setNumber,
-    questions,
-    activeExam.userAnswers || {},
-    totalTimeSeconds,
-    stableAttemptId,
-    now
-  );
+  try {
+    // Double-check history under acquired lock
+    const historyUnderLock = getAllAttempts().find((a) => a.attemptId === stableAttemptId);
+    if (historyUnderLock) {
+      clearActiveExam(setNumber);
+      return historyUnderLock;
+    }
 
-  // Persist attempt safely
-  saveAttempt(attempt);
+    // Calculate total test time
+    const totalTimeSeconds = settings.totalDurationMinutes * 60;
 
-  // Clear active exam state ONLY after successful persistence
-  clearActiveExam(setNumber);
+    // TASK 3: Preserve original exam expiration timestamp (activeExam.examEndTime), NOT Date.now()!
+    const attempt = buildTestAttempt(
+      setNumber,
+      questions,
+      activeExam.userAnswers || {},
+      totalTimeSeconds,
+      stableAttemptId,
+      activeExam.examEndTime
+    );
 
-  return attempt;
+    // Persist attempt safely
+    const saveResult = saveAttempt(attempt);
+    if (!saveResult.success) {
+      console.error('Failed to persist recovered exam. Retaining active exam state:', saveResult.error);
+      return null;
+    }
+
+    // Verify it exists in permanent attempt history before clearing active exam
+    const verifiedAttempts = getAllAttempts();
+    const isSaved = verifiedAttempts.some((a) => a.attemptId === stableAttemptId);
+    if (!isSaved) {
+      console.error('Attempt was not verified in permanent attempt history. Retaining active exam state.');
+      return null;
+    }
+
+    // Clear active exam state ONLY after successful, verified persistence
+    clearActiveExam(setNumber);
+
+    try {
+      localStorage.setItem(
+        `oir_recent_recovery_${setNumber}`,
+        JSON.stringify({ attemptId: stableAttemptId, expiresAt: Date.now() + 30000 })
+      );
+    } catch {
+      // Ignore
+    }
+
+    return attempt;
+  } finally {
+    releaseRecoveryLock(setNumber, ownerId);
+  }
 }
 
 export function clearAllUserData(): void {
   localStorage.removeItem(ATTEMPTS_KEY);
   for (let s = 1; s <= 20; s++) {
     clearActiveExam(s);
+    try {
+      localStorage.removeItem(`oir_recent_recovery_${s}`);
+      localStorage.removeItem(`${LOCK_KEY_PREFIX}${s}`);
+    } catch {
+      // Ignore
+    }
   }
 }

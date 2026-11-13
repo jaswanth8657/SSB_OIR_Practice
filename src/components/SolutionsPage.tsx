@@ -74,15 +74,15 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
       {/* Top Header */}
-      <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 shadow-xl">
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-sm">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             {onBackToResults ? (
               <button
                 onClick={onBackToResults}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition cursor-pointer shadow-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold transition cursor-pointer shadow-sm"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 <span>Results</span>
@@ -90,29 +90,29 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
             ) : null}
             <button
               onClick={onBackToDashboard}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition cursor-pointer shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold transition cursor-pointer shadow-sm"
             >
-              <LayoutDashboard className="w-3.5 h-3.5 text-cyan-400" />
+              <LayoutDashboard className="w-3.5 h-3.5 text-blue-600" />
               <span>Dashboard</span>
             </button>
-            <h1 className="text-base sm:text-lg font-extrabold text-white">
-              Solutions & Explanations – <span className="text-cyan-400">SET {pad}</span>
+            <h1 className="text-base sm:text-lg font-extrabold text-slate-900">
+              Solutions & Explanations – <span className="text-blue-600">SET {pad}</span>
             </h1>
           </div>
 
           {/* Quick Counter */}
           <div className="flex items-center gap-2 text-xs font-mono">
-            <span className="px-2.5 py-1 rounded-lg bg-emerald-950/70 text-emerald-400 border border-emerald-700/60 font-bold">
+            <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold">
               {correctCount} Correct
             </span>
-            <span className="px-2.5 py-1 rounded-lg bg-rose-950/70 text-rose-400 border border-rose-700/60 font-bold">
+            <span className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-800 border border-rose-200 font-bold">
               {incorrectCount} Incorrect
             </span>
-            <span className="px-2.5 py-1 rounded-lg bg-amber-950/70 text-amber-400 border border-amber-700/60 font-bold">
+            <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 font-bold">
               {unansweredCount} Unanswered
             </span>
             {excludedCount > 0 && (
-              <span className="px-2.5 py-1 rounded-lg bg-purple-950/70 text-purple-400 border border-purple-700/60 font-bold">
+              <span className="px-2.5 py-1 rounded-lg bg-purple-50 text-purple-800 border border-purple-200 font-bold">
                 {excludedCount} Excluded
               </span>
             )}
@@ -120,13 +120,13 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
         </div>
 
         {/* Filter Navigation Tabs */}
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center gap-2 overflow-x-auto py-2.5 border-t border-slate-800/80 text-xs font-bold">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center gap-2 overflow-x-auto py-2.5 border-t border-slate-200 text-xs font-bold">
           <button
             onClick={() => setActiveFilter('all')}
             className={`px-3.5 py-1.5 rounded-xl transition cursor-pointer ${
               activeFilter === 'all'
-                ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-md shadow-blue-600/30'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/80'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
             All Questions ({questions.length})
@@ -135,33 +135,33 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
             onClick={() => setActiveFilter('correct')}
             className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl transition cursor-pointer ${
               activeFilter === 'correct'
-                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
-                : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800/80'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-emerald-700 hover:bg-slate-100'
             }`}
           >
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
             <span>Correct ({correctCount})</span>
           </button>
           <button
             onClick={() => setActiveFilter('incorrect')}
             className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl transition cursor-pointer ${
               activeFilter === 'incorrect'
-                ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
-                : 'text-slate-400 hover:text-rose-400 hover:bg-slate-800/80'
+                ? 'bg-rose-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-rose-700 hover:bg-slate-100'
             }`}
           >
-            <XCircle className="w-3.5 h-3.5 text-rose-400" />
+            <XCircle className="w-3.5 h-3.5 text-rose-600" />
             <span>Incorrect ({incorrectCount})</span>
           </button>
           <button
             onClick={() => setActiveFilter('unanswered')}
             className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl transition cursor-pointer ${
               activeFilter === 'unanswered'
-                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30'
-                : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800/80'
+                ? 'bg-amber-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-amber-700 hover:bg-slate-100'
             }`}
           >
-            <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+            <HelpCircle className="w-3.5 h-3.5 text-amber-600" />
             <span>Unanswered ({unansweredCount})</span>
           </button>
         </div>
@@ -170,9 +170,9 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
       {/* Main Solution Feed */}
       <main className="max-w-4xl mx-auto w-full p-4 sm:p-6 space-y-6">
         {filteredQuestions.length === 0 ? (
-          <div className="text-center py-16 bg-slate-900/80 border border-slate-800 rounded-3xl p-8 space-y-3">
-            <BookOpen className="w-10 h-10 text-slate-600 mx-auto" />
-            <h3 className="text-base font-bold text-slate-300">
+          <div className="text-center py-16 bg-white border border-slate-200 rounded-3xl p-8 space-y-3 shadow-sm">
+            <BookOpen className="w-10 h-10 text-slate-400 mx-auto" />
+            <h3 className="text-base font-bold text-slate-700">
               No questions found for this filter
             </h3>
             <p className="text-xs text-slate-500">
@@ -187,31 +187,31 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
             const isUnanswered = status === 'unanswered';
 
             const cardBorderColor = isExcluded
-              ? 'border-purple-600/60 bg-purple-950/15'
+              ? 'border-purple-200 bg-white'
               : isCorrect
-              ? 'border-emerald-600/60 bg-emerald-950/15'
+              ? 'border-emerald-200 bg-white'
               : isIncorrect
-              ? 'border-rose-600/60 bg-rose-950/15'
-              : 'border-amber-600/60 bg-amber-950/15';
+              ? 'border-rose-200 bg-white'
+              : 'border-slate-200 bg-white';
 
             const statusBadge = isExcluded ? (
-              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 text-xs font-bold">
-                <ShieldAlert className="w-3 h-3 text-purple-400" />
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-purple-50 text-purple-800 border border-purple-200 text-xs font-bold">
+                <ShieldAlert className="w-3 h-3 text-purple-600" />
                 <span>Excluded from Scoring</span>
               </span>
             ) : isCorrect ? (
-              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold">
-                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold">
+                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                 <span>Correct</span>
               </span>
             ) : isIncorrect ? (
-              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
-                <XCircle className="w-3 h-3 text-rose-400" />
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-rose-50 text-rose-800 border border-rose-200 text-xs font-bold">
+                <XCircle className="w-3 h-3 text-rose-600" />
                 <span>Incorrect</span>
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-bold">
-                <HelpCircle className="w-3 h-3 text-amber-400" />
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-xs font-bold">
+                <HelpCircle className="w-3 h-3 text-amber-600" />
                 <span>Unanswered</span>
               </span>
             );
@@ -226,15 +226,15 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
             return (
               <div
                 key={q.questionNumber}
-                className={`border rounded-3xl p-5 sm:p-7 shadow-xl space-y-4 transition ${cardBorderColor}`}
+                className={`border rounded-3xl p-5 sm:p-7 shadow-sm space-y-4 transition ${cardBorderColor}`}
               >
                 {/* Question Top Row */}
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                   <div className="flex items-center gap-3">
-                    <span className="w-8 h-8 rounded-xl bg-slate-800 border border-slate-700 text-white font-mono font-extrabold flex items-center justify-center text-sm shadow">
+                    <span className="w-8 h-8 rounded-xl bg-slate-100 border border-slate-200 text-slate-800 font-mono font-extrabold flex items-center justify-center text-sm shadow-sm">
                       {q.questionNumber}
                     </span>
-                    <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">
+                    <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
                       Question {q.questionNumber} of 50
                     </span>
                   </div>
@@ -243,13 +243,13 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
 
                 {/* TASK 4: Excluded From Scoring Banner */}
                 {isExcluded && (
-                  <div className="p-4 rounded-2xl bg-purple-950/50 border border-purple-600/50 text-purple-200 text-xs flex items-start gap-3 shadow-sm">
-                    <ShieldAlert className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
+                  <div className="p-4 rounded-2xl bg-purple-50 border border-purple-200 text-purple-900 text-xs flex items-start gap-3 shadow-sm">
+                    <ShieldAlert className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
                     <div className="space-y-1">
-                      <div className="font-bold text-purple-300 text-sm">
+                      <div className="font-bold text-purple-800 text-sm">
                         Excluded from Scoring:
                       </div>
-                      <p className="text-purple-200/90 leading-relaxed">
+                      <p className="text-purple-800/90 leading-relaxed">
                         {q.scoringExclusionReason ||
                           'This question has ambiguous options in the source reference key. It is excluded from automatic scoring to ensure fair grading, and does not count against your final score or accuracy calculation.'}
                       </p>
@@ -259,13 +259,13 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
 
                 {/* Source Discrepancy Alert Banner if present (and not already highlighted by exclusion banner) */}
                 {q.hasSourceDiscrepancy && !isExcluded && (
-                  <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-start gap-3">
-                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-3 shadow-sm">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                     <div className="space-y-1">
-                      <div className="font-bold text-amber-300">
+                      <div className="font-bold text-amber-800">
                         Source Material Discrepancy Notice:
                       </div>
-                      <p className="text-amber-200/90 leading-relaxed">
+                      <p className="text-amber-800/90 leading-relaxed">
                         {q.sourceDiscrepancyNote ||
                           'Question statement and answer key have an apparent source discrepancy in the original test material. The original question and official answer key are faithfully preserved as published.'}
                       </p>
@@ -276,11 +276,11 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
                 {/* Question Statement */}
                 <div className="space-y-2">
                   {q.instruction && (
-                    <div className="p-2.5 rounded-xl bg-blue-950/40 border border-blue-900/40 text-blue-300 text-xs">
+                    <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs">
                       <strong>Instruction:</strong> {q.instruction}
                     </div>
                   )}
-                  <p className="text-sm sm:text-base font-semibold text-slate-100 leading-relaxed whitespace-pre-line">
+                  <p className="text-sm sm:text-base font-semibold text-slate-900 leading-relaxed whitespace-pre-line">
                     {q.statement}
                   </p>
                 </div>
@@ -288,18 +288,18 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
                 {/* Original Question Diagrams */}
                 {q.images && q.images.length > 0 && (
                   <div className="space-y-2 pt-1">
-                    <div className="text-[11px] text-slate-400 flex items-center justify-between">
+                    <div className="text-[11px] text-slate-500 flex items-center justify-between">
                       <span>Question Diagram ({q.images.length})</span>
-                      <span className="text-cyan-400 flex items-center gap-1 font-semibold">
+                      <span className="text-blue-600 flex items-center gap-1 font-semibold">
                         <ZoomIn className="w-3 h-3" /> Click to enlarge
                       </span>
                     </div>
-                    <div className="flex flex-wrap items-center justify-center gap-3 bg-white/95 p-3.5 rounded-2xl border border-slate-700 shadow-inner">
+                    <div className="flex flex-wrap items-center justify-center gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200 shadow-sm">
                       {q.images.map((imgSrc, iIdx) => (
                         <div
                           key={iIdx}
                           onClick={() => setZoomedImage(imgSrc)}
-                          className="cursor-pointer group relative overflow-hidden rounded-xl hover:ring-2 hover:ring-cyan-500 transition"
+                          className="cursor-pointer group relative overflow-hidden rounded-xl hover:ring-2 hover:ring-blue-500 transition"
                         >
                           <img
                             src={imgSrc}
@@ -317,24 +317,24 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
                   {/* User Selection */}
                   <div className={`p-3.5 rounded-2xl border text-xs space-y-1 ${
                     isExcluded
-                      ? 'bg-slate-800/70 border-slate-700/70'
+                      ? 'bg-slate-50 border-slate-200'
                       : isCorrect
-                      ? 'bg-emerald-950/40 border-emerald-700/50'
+                      ? 'bg-emerald-50 border-emerald-200'
                       : isIncorrect
-                      ? 'bg-rose-950/40 border-rose-700/50'
-                      : 'bg-slate-800/70 border-slate-700/70'
+                      ? 'bg-rose-50 border-rose-200'
+                      : 'bg-slate-50 border-slate-200'
                   }`}>
-                    <span className="text-[11px] text-slate-400 uppercase font-bold tracking-wider">
+                    <span className="text-[11px] text-slate-500 uppercase font-bold tracking-wider">
                       Your Answer:
                     </span>
                     <div className={`text-sm font-semibold font-mono ${
                       isExcluded
-                        ? 'text-purple-300'
+                        ? 'text-purple-700'
                         : isCorrect
-                        ? 'text-emerald-400'
+                        ? 'text-emerald-700'
                         : isIncorrect
-                        ? 'text-rose-400'
-                        : 'text-amber-400'
+                        ? 'text-rose-700'
+                        : 'text-amber-700'
                     }`}>
                       {evalRes.userDisplayAnswer}
                     </div>
@@ -343,8 +343,8 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
                   {/* Correct Answer */}
                   <div className={`p-3.5 rounded-2xl border text-xs space-y-1 ${
                     isExcluded
-                      ? 'bg-purple-950/40 border-purple-700/50 text-purple-200'
-                      : 'bg-emerald-950/40 border-emerald-700/50 text-emerald-200'
+                      ? 'bg-purple-50 border-purple-200 text-purple-900'
+                      : 'bg-emerald-50 border-emerald-200 text-emerald-900'
                   }`}>
                     <span className="text-[11px] uppercase font-bold tracking-wider opacity-80">
                       {isExcluded
@@ -352,29 +352,29 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
                         : 'Official Correct Answer:'}
                     </span>
                     <div className="text-sm font-bold font-mono flex items-center gap-1.5">
-                      <Check className="w-4 h-4 text-emerald-400" />
+                      <Check className="w-4 h-4 text-emerald-600" />
                       <span>{evalRes.correctDisplayAnswer}</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Explanation Section */}
-                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/95 border border-slate-800 text-xs space-y-3">
-                  <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
-                    <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-50 border border-slate-200 text-xs space-y-3">
+                  <div className="flex items-center gap-2 text-amber-800 font-bold text-xs uppercase tracking-wider">
+                    <BookOpen className="w-3.5 h-3.5 text-amber-600" />
                     <span>Official Solution & Explanation:</span>
                   </div>
 
                   {/* TASK 7: Missing Source Explanation Notice */}
                   {q.hasMissingSourceExplanation ? (
-                    <div className="p-3.5 rounded-xl bg-blue-950/40 border border-blue-800/50 text-blue-200 text-xs flex items-start gap-2.5">
-                      <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                    <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-start gap-2.5">
+                      <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
                       <p className="leading-relaxed font-medium">
                         The original reference booklet provides the correct answer but does not include a written explanation for this question.
                       </p>
                     </div>
                   ) : (
-                    <p className="text-slate-300 leading-relaxed whitespace-pre-line text-xs sm:text-sm">
+                    <p className="text-slate-700 leading-relaxed whitespace-pre-line text-xs sm:text-sm">
                       {q.explanation || 'Refer to the question diagram and options.'}
                     </p>
                   )}
@@ -382,13 +382,13 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
                   {/* Solution Diagrams if present */}
                   {allSolutionImages.length > 0 && (
                     <div className="pt-2 space-y-2">
-                      <div className="text-[11px] text-slate-400 flex items-center justify-between">
+                      <div className="text-[11px] text-slate-500 flex items-center justify-between">
                         <span>Solution Diagram ({allSolutionImages.length}):</span>
-                        <span className="text-emerald-400 flex items-center gap-1 font-semibold">
+                        <span className="text-emerald-700 flex items-center gap-1 font-semibold">
                           <ZoomIn className="w-3 h-3" /> Click to enlarge
                         </span>
                       </div>
-                      <div className="flex flex-wrap items-center gap-3 bg-white p-3.5 rounded-2xl border border-slate-700">
+                      <div className="flex flex-wrap items-center gap-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
                         {allSolutionImages.map((solImg, sIdx) => (
                           <div
                             key={sIdx}

@@ -214,7 +214,7 @@ export const App: React.FC = () => {
     setsSummary.find((s) => s.setNumber === activeSetNumber) || setsSummary[0];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Plus_Jakarta_Sans',sans-serif]">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-['Plus_Jakarta_Sans',sans-serif]">
       {/* Navbar: visible on dashboard or when viewing results/solutions */}
       {currentView !== 'exam' && (
         <Navbar

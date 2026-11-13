@@ -12,6 +12,7 @@ export interface EvaluationResult {
  * Rejects non-numeric, infinity, NaN, or strings with extra text.
  */
 export function parseNumericValue(val: string): number | null {
+  if (typeof val !== 'string') return null;
   const clean = val.trim();
   if (!clean) return null;
 
@@ -19,16 +20,22 @@ export function parseNumericValue(val: string): number | null {
   if (clean.includes('/')) {
     const parts = clean.split('/');
     if (parts.length === 2) {
-      const num = Number(parts[0].trim());
-      const den = Number(parts[1].trim());
-      if (!isNaN(num) && !isNaN(den) && den !== 0 && isFinite(num) && isFinite(den)) {
-        return num / den;
+      const numStr = parts[0].trim();
+      const denStr = parts[1].trim();
+      // Ensure numerator is an integer (optional minus) and denominator is positive integer
+      if (/^-?\d+$/.test(numStr) && /^\d+$/.test(denStr)) {
+        const num = Number(numStr);
+        const den = Number(denStr);
+        if (den !== 0 && isFinite(num) && isFinite(den)) {
+          return num / den;
+        }
       }
     }
     return null;
   }
 
-  // Plain numbers e.g. "8", "8.0", "0.5", "-4"
+  // Strict integer or decimal: e.g. "8", "8.0", "0.5", "-4"
+  // Strictly rejects "NaN", "Infinity", "+Infinity", hexadecimal, etc.
   if (!/^-?\d+(\.\d+)?$/.test(clean)) {
     return null;
   }
@@ -42,6 +49,8 @@ export function parseNumericValue(val: string): number | null {
 
 /**
  * Checks if two numbers are equivalent within floating-point tolerance (1e-6).
+ * For numerical series, strictly rejects non-numeric or unparseable inputs
+ * without falling back to string equality.
  */
 export function areNumbersEquivalent(userVal: string, corrVal: string): boolean {
   const uNum = parseNumericValue(userVal);
@@ -51,56 +60,147 @@ export function areNumbersEquivalent(userVal: string, corrVal: string): boolean 
     return Math.abs(uNum - cNum) < 1e-6;
   }
 
-  return userVal.trim().toLowerCase() === corrVal.trim().toLowerCase();
+  // For numerical evaluations, never fall back to string equality
+  return false;
 }
 
 /**
- * Normalizes two-part answers (letters or numbers) into [part1, part2].
- * Accepts separators like comma, 'and', space, slash, etc.
+ * TASK 1: Strict two-part numerical series parser.
+ * Requires exactly two valid numerical values (integers, decimals, or fractions).
+ * Strictly rejects:
+ * - Additional values (e.g. "8, 13, 21", "1/2, 1/4, 1/8")
+ * - Incomplete answers (e.g. "8", "8, ")
+ * - Empty components (e.g. "8, , 13")
+ * - Malformed fractions
+ * - NaN, Infinity
+ * - Arrays with length !== 2
+ */
+export function parseTwoPartNumber(input: unknown): [string, string] | null {
+  if (input === undefined || input === null) return null;
+
+  // 1. Direct array inputs: require exactly 2 elements
+  if (Array.isArray(input)) {
+    if (input.length !== 2) return null;
+    const p1 = String(input[0]).trim();
+    const p2 = String(input[1]).trim();
+    if (!p1 || !p2) return null;
+    if (parseNumericValue(p1) === null || parseNumericValue(p2) === null) {
+      return null;
+    }
+    return [p1, p2];
+  }
+
+  const str = String(input).trim();
+  if (!str) return null;
+
+  // Check for empty comma components like "8, , 13" or trailing/leading comma
+  if (str.includes(',')) {
+    // Normalize adjacent comma + and: "8, and 13" -> "8, 13"
+    const normalized = str.replace(/,\s*(?:and|&)\s*/gi, ',');
+    const rawParts = normalized.split(',');
+    // If any part is empty or length !== 2, reject immediately
+    if (rawParts.length !== 2) return null;
+    const p1 = rawParts[0].trim();
+    const p2 = rawParts[1].trim();
+    if (!p1 || !p2) return null;
+    if (parseNumericValue(p1) === null || parseNumericValue(p2) === null) {
+      return null;
+    }
+    return [p1, p2];
+  }
+
+  // Check for semicolon separator
+  if (str.includes(';')) {
+    const rawParts = str.split(';');
+    if (rawParts.length !== 2) return null;
+    const p1 = rawParts[0].trim();
+    const p2 = rawParts[1].trim();
+    if (!p1 || !p2) return null;
+    if (parseNumericValue(p1) === null || parseNumericValue(p2) === null) {
+      return null;
+    }
+    return [p1, p2];
+  }
+
+  // Check for "and" or "&" separator (word boundary for 'and')
+  const andMatch = str.match(/\s+(?:and|&)\s+/i);
+  if (andMatch) {
+    const rawParts = str.split(/\s+(?:and|&)\s+/i);
+    if (rawParts.length !== 2) return null;
+    const p1 = rawParts[0].trim();
+    const p2 = rawParts[1].trim();
+    if (!p1 || !p2) return null;
+    if (parseNumericValue(p1) === null || parseNumericValue(p2) === null) {
+      return null;
+    }
+    return [p1, p2];
+  }
+
+  // Whitespace-separated: e.g. "8 13" or "1/2 1/4"
+  const spaceParts = str.split(/\s+/);
+  if (spaceParts.length === 2) {
+    const p1 = spaceParts[0].trim();
+    const p2 = spaceParts[1].trim();
+    if (!p1 || !p2) return null;
+    if (parseNumericValue(p1) === null || parseNumericValue(p2) === null) {
+      return null;
+    }
+    return [p1, p2];
+  }
+
+  return null;
+}
+
+/**
+ * Normalizes two-part letter answers (Question 13) into [part1, part2].
+ * Accepts separators like comma, 'and', space, semicolon.
+ * Rejects extra answers (must have exactly two parts).
  */
 export function parseTwoPart(input: unknown): [string, string] | null {
   if (!input) return null;
 
   if (Array.isArray(input)) {
-    if (input.length >= 2) {
+    if (input.length === 2) {
       const p1 = String(input[0]).trim();
       const p2 = String(input[1]).trim();
       if (p1 && p2) return [p1, p2];
     }
-    if (input.length === 1) {
-      return parseTwoPart(input[0]);
-    }
+    return null;
   }
 
   const str = String(input).trim();
-  // 1. First attempt split by explicit separators: comma, 'and', '&', semicolon
-  let parts = str
-    .split(/\s*(?:,|&|\band\b|;)\s*/i)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  if (!str) return null;
 
-  if (parts.length >= 2) {
-    return [parts[0], parts[1]];
+  // 1. Explicit separators: comma, 'and', '&', semicolon
+  const normStr = str.replace(/,\s*(?:and|&)\s*/gi, ',');
+  if (normStr.includes(',')) {
+    const parts = normStr.split(',');
+    if (parts.length === 2 && parts[0].trim() && parts[1].trim()) {
+      return [parts[0].trim(), parts[1].trim()];
+    }
+    return null;
   }
 
-  // 2. Second attempt: whitespace separator
-  parts = str
-    .split(/\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  if (parts.length >= 2) {
-    return [parts[0], parts[1]];
+  if (str.includes(';')) {
+    const parts = str.split(';');
+    if (parts.length === 2 && parts[0].trim() && parts[1].trim()) {
+      return [parts[0].trim(), parts[1].trim()];
+    }
+    return null;
   }
 
-  // 3. Fallback: slash only if not a fraction
-  parts = str
-    .split(/\s*\/\s*/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  if (/\s+(?:and|&)\s+/i.test(str)) {
+    const parts = str.split(/\s+(?:and|&)\s+/i);
+    if (parts.length === 2 && parts[0].trim() && parts[1].trim()) {
+      return [parts[0].trim(), parts[1].trim()];
+    }
+    return null;
+  }
 
-  if (parts.length >= 2) {
-    return [parts[0], parts[1]];
+  // 2. Whitespace separator
+  const parts = str.split(/\s+/);
+  if (parts.length === 2 && parts[0].trim() && parts[1].trim()) {
+    return [parts[0].trim(), parts[1].trim()];
   }
 
   return null;
@@ -205,10 +305,20 @@ export function evaluateAnswer(
 
   // 2. Two-Part Numerical Series (Question 45)
   if (question.type === 'two_part_number') {
-    const userParts = twoPartAnswer || parseTwoPart(selectedOption);
-    const corrParts = parseTwoPart(correctRaw);
+    const userParts = twoPartAnswer
+      ? parseTwoPartNumber(twoPartAnswer)
+      : parseTwoPartNumber(selectedOption);
+    const corrParts = parseTwoPartNumber(correctRaw);
 
-    const userDisp = userParts ? `${userParts[0]} and ${userParts[1]}` : String(selectedOption || 'Incomplete');
+    const rawUserStr = twoPartAnswer
+      ? Array.isArray(twoPartAnswer)
+        ? twoPartAnswer.join(', ')
+        : String(twoPartAnswer)
+      : Array.isArray(selectedOption)
+      ? selectedOption.join(', ')
+      : String(selectedOption || 'Incomplete');
+
+    const userDisp = userParts ? `${userParts[0]} and ${userParts[1]}` : rawUserStr;
     const corrDisp = corrParts ? `${corrParts[0]} and ${corrParts[1]}` : correctRaw;
 
     if (!userParts || !corrParts) {

@@ -27,6 +27,11 @@ describe('Production Evaluator Engine (src/utils/evaluator.ts)', () => {
       expect(res.isCorrect).toBe(true);
     });
 
+    it('accepts whitespace-separated correct answer in order ("8 13")', () => {
+      const res = evaluateAnswer(q45, '8 13');
+      expect(res.isCorrect).toBe(true);
+    });
+
     it('accepts two-part array in order', () => {
       const res = evaluateAnswer(q45, undefined, ['8', '13']);
       expect(res.isCorrect).toBe(true);
@@ -40,6 +45,22 @@ describe('Production Evaluator Engine (src/utils/evaluator.ts)', () => {
     it('REJECTS reversed array answers', () => {
       const res = evaluateAnswer(q45, undefined, ['13', '8']);
       expect(res.isCorrect).toBe(false);
+    });
+
+    it('REJECTS additional values ("8, 13, 21")', () => {
+      expect(evaluateAnswer(q45, '8, 13, 21').isCorrect).toBe(false);
+      expect(evaluateAnswer(q45, undefined, ['8', '13', '21'] as unknown as [string, string]).isCorrect).toBe(false);
+    });
+
+    it('REJECTS empty components ("8, , 13")', () => {
+      expect(evaluateAnswer(q45, '8, , 13').isCorrect).toBe(false);
+    });
+
+    it('REJECTS NaN and Infinity in answers', () => {
+      expect(evaluateAnswer(q45, 'NaN, 13').isCorrect).toBe(false);
+      expect(evaluateAnswer(q45, 'Infinity, 13').isCorrect).toBe(false);
+      expect(evaluateAnswer(q45, undefined, ['NaN', '13']).isCorrect).toBe(false);
+      expect(evaluateAnswer(q45, undefined, ['Infinity', '13']).isCorrect).toBe(false);
     });
 
     it('REJECTS incorrect numbers', () => {
@@ -72,10 +93,14 @@ describe('Production Evaluator Engine (src/utils/evaluator.ts)', () => {
       expect(evaluateAnswer(qFraction, '0.5, 0.25').isCorrect).toBe(true);
       expect(evaluateAnswer(qFraction, undefined, ['0.5', '0.25']).isCorrect).toBe(true);
       expect(evaluateAnswer(qFraction, '1/2 and 1/4').isCorrect).toBe(true);
+      expect(evaluateAnswer(qFraction, '1/2, 1/4').isCorrect).toBe(true);
 
       // Reversed must be REJECTED
       expect(evaluateAnswer(qFraction, '0.25, 0.5').isCorrect).toBe(false);
       expect(evaluateAnswer(qFraction, undefined, ['0.25', '0.5']).isCorrect).toBe(false);
+
+      // Extra values in fractions must be REJECTED
+      expect(evaluateAnswer(qFraction, '1/2, 1/4, 1/8').isCorrect).toBe(false);
     });
   });
 
