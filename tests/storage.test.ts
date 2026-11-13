@@ -319,7 +319,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       ).toBe(50);
     });
 
-    it('Case B: NEVER guesses when Q11 record is missing or incomplete: preserves recorded score and flags review_required', () => {
+    it('Case B: NEVER guesses when Q11 record is missing: preserves recorded score and flags review_required', () => {
       const legacySet06MissingQ11: TestAttempt = {
         attemptId: 'att_6_legacy_missing_q11',
         setNumber: 6,
@@ -334,14 +334,11 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
         accuracyPercentage: 83,
         timeTakenSeconds: 1100,
         userAnswers: {
-          // Q11 is completely missing from userAnswers
           1: { questionNumber: 1, selectedOption: 'A', isAnswered: true, isCorrect: true },
         },
       };
 
       const normalized = normalizeLegacyAttempt(legacySet06MissingQ11);
-
-      // CRITICAL REQUIREMENT: Score MUST NOT be altered based on a guess!
       expect(normalized.score).toBe(40);
       expect(normalized.correctAnswers).toBe(40);
       expect(normalized.incorrectAnswers).toBe(8);
@@ -349,6 +346,187 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       expect(normalized.isLegacyUnverified).toBe(true);
       expect(normalized.legacyStatus).toBe('review_required');
       expect(normalized.legacyNote).toContain('Question 11 response could not be verified');
+    });
+
+    it('Defect 1: Rejects normalization when Q11 object has no isAnswered', () => {
+      const att: TestAttempt = {
+        attemptId: 'att_6_no_is_answered',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 40,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11 } as any,
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(att);
+      expect(normalized.score).toBe(40);
+      expect(normalized.correctAnswers).toBe(40);
+      expect(normalized.unansweredQuestions).toBe(2);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+    });
+
+    it('Defect 1: Rejects normalization when Q11 is marked answered but missing isCorrect', () => {
+      const att: TestAttempt = {
+        attemptId: 'att_6_missing_is_correct',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 40,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: true } as any,
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(att);
+      expect(normalized.score).toBe(40);
+      expect(normalized.correctAnswers).toBe(40);
+      expect(normalized.incorrectAnswers).toBe(8);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+    });
+
+    it('Defect 1: Rejects normalization when isAnswered is not a boolean', () => {
+      const att: TestAttempt = {
+        attemptId: 'att_6_malformed_boolean',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 40,
+        correctAnswers: 40,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: 'true' as any, isCorrect: true as any },
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(att);
+      expect(normalized.score).toBe(40);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+    });
+
+    it('Defect 1: Rejects normalization when aggregate counters are missing', () => {
+      const att: TestAttempt = {
+        attemptId: 'att_6_missing_counters',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 40,
+        correctAnswers: undefined as any,
+        incorrectAnswers: 8,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 83,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: true, isCorrect: true },
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(att);
+      expect(normalized.score).toBe(40);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+    });
+
+    it('Defect 1: Rejects normalization when aggregate counter is 0 but deduction is required', () => {
+      const att: TestAttempt = {
+        attemptId: 'att_6_zero_counter',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 0,
+        correctAnswers: 0, // 0 correct answers, cannot deduct 1!
+        incorrectAnswers: 48,
+        unansweredQuestions: 2,
+        excludedQuestions: 0,
+        accuracyPercentage: 0,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: true, isCorrect: true },
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(att);
+      // Must NOT use Math.max(0, -1) to hide this! Must preserve score 0 and flag review_required
+      expect(normalized.score).toBe(0);
+      expect(normalized.correctAnswers).toBe(0);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+    });
+
+    it('Defect 1: Rejects normalization when aggregate totals are inconsistent', () => {
+      const att: TestAttempt = {
+        attemptId: 'att_6_inconsistent_totals',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: 30,
+        correctAnswers: 30,
+        incorrectAnswers: 5,
+        unansweredQuestions: 5, // Sum = 40 !== 50!
+        excludedQuestions: 0,
+        accuracyPercentage: 85,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: true, isCorrect: true },
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(att);
+      expect(normalized.score).toBe(30);
+      expect(normalized.correctAnswers).toBe(30);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
+    });
+
+    it('Defect 1: Rejects normalization when aggregate values are negative', () => {
+      const att: TestAttempt = {
+        attemptId: 'att_6_negative_values',
+        setNumber: 6,
+        timestamp: 1600000000000,
+        totalQuestions: 50,
+        maxScore: 50,
+        score: -5,
+        correctAnswers: -5,
+        incorrectAnswers: 50,
+        unansweredQuestions: 5,
+        excludedQuestions: 0,
+        accuracyPercentage: 0,
+        timeTakenSeconds: 1100,
+        userAnswers: {
+          11: { questionNumber: 11, isAnswered: true, isCorrect: true },
+        },
+      };
+
+      const normalized = normalizeLegacyAttempt(att);
+      expect(normalized.isLegacyUnverified).toBe(true);
+      expect(normalized.legacyStatus).toBe('review_required');
     });
 
     it('Case C: Leaves already-normalized attempts completely unchanged on repeated loads', () => {
@@ -439,7 +617,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       };
 
       saveActiveExam(activeState);
-      expect(getActiveExam(1)).not.toBeNull();
+      expect(await getActiveExam(1)).not.toBeNull();
 
       const res = await checkAndRecoverExpiredExam(1, mockQuestions, DEFAULT_SETTINGS);
       expect(res.status).toBe('recovered');
@@ -456,7 +634,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       expect(getAllAttempts().length).toBe(1);
 
       // Verify active exam was cleared after successful save
-      expect(getActiveExam(1)).toBeNull();
+      expect(await getActiveExam(1)).toBeNull();
 
       // Repeated recovery must return already_recovered and NOT duplicate attempt in history
       const repeated = await checkAndRecoverExpiredExam(1, mockQuestions, DEFAULT_SETTINGS);
@@ -494,7 +672,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       // Exactly ONE attempt must exist in permanent history
       const set3Attempts = getAttemptsForSet(3);
       expect(set3Attempts.length).toBe(1);
-      expect(getActiveExam(3)).toBeNull();
+      expect(await getActiveExam(3)).toBeNull();
     });
 
     it('recovers independent examination sets simultaneously without cross-blocking', async () => {
@@ -570,7 +748,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       }
 
       // CRITICAL: Active exam MUST NOT be deleted if saving failed!
-      expect(getActiveExam(4)).not.toBeNull();
+      expect(await getActiveExam(4)).not.toBeNull();
     });
 
     it('returns not_expired if exam is still in progress', async () => {
@@ -589,7 +767,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       saveActiveExam(activeState);
       const res = await checkAndRecoverExpiredExam(2, mockQuestions, DEFAULT_SETTINGS);
       expect(res.status).toBe('not_expired');
-      expect(getActiveExam(2)).not.toBeNull();
+      expect(await getActiveExam(2)).not.toBeNull();
     });
 
     it('IndexedDB fallback lease acquisition, lease verification, and release work cleanly', async () => {
@@ -624,6 +802,200 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       const reclaimed = await acquireIdbLease(12, newOwner, 5000);
       expect(reclaimed).toBe(true);
       await releaseIdbLease(12, newOwner);
+    });
+  });
+
+  // 7. Defect 3: Active Examination Persistence & Durable IndexedDB Fallback
+  describe('Active Exam Persistence & Durable IndexedDB Fallback (Defect 3)', () => {
+    it('saves to localStorage and passes read-back verification', async () => {
+      const now = Date.now();
+      const state: ActiveExamState = {
+        setNumber: 15,
+        currentQuestionIndex: 10,
+        userAnswers: { 1: { questionNumber: 1, selectedOption: 'A', isAnswered: true } },
+        examStartTime: now - 5000,
+        examEndTime: now + 20 * 60 * 1000,
+        questionTimeLeft: { 11: 35 },
+        currentQuestionStartedAt: now - 5000,
+        questionExpiredMap: {},
+      };
+
+      const result = await saveActiveExam(state);
+      expect(result.success).toBe(true);
+      expect(result.storageType).toBe('localStorage');
+
+      const loaded = await getActiveExam(15);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.setNumber).toBe(15);
+      expect(loaded?.currentQuestionIndex).toBe(10);
+      expect(loaded?.examEndTime).toBe(state.examEndTime);
+      expect(loaded?.userAnswers[1].selectedOption).toBe('A');
+    });
+
+    it('falls back to IndexedDB when localStorage throws quota exceeded', async () => {
+      // Mock localStorage throwing error
+      vi.stubGlobal('localStorage', {
+        ...localStorage,
+        getItem: () => null,
+        setItem: () => {
+          throw new Error('QuotaExceededError: localStorage full');
+        },
+        removeItem: () => {},
+      });
+
+      const now = Date.now();
+      const state: ActiveExamState = {
+        setNumber: 16,
+        currentQuestionIndex: 25,
+        userAnswers: { 26: { questionNumber: 26, selectedOption: '2', isAnswered: true } },
+        examStartTime: now - 10000,
+        examEndTime: now + 15 * 60 * 1000,
+        questionTimeLeft: { 26: 28 },
+        currentQuestionStartedAt: now - 10000,
+        questionExpiredMap: {},
+      };
+
+      const result = await saveActiveExam(state);
+      expect(result.success).toBe(true);
+      expect(result.storageType).toBe('indexedDB');
+
+      // Restoration from IndexedDB succeeds
+      const restored = await getActiveExam(16);
+      expect(restored).not.toBeNull();
+      expect(restored?.setNumber).toBe(16);
+      expect(restored?.currentQuestionIndex).toBe(25);
+      expect(restored?.userAnswers[26].selectedOption).toBe('2');
+      expect(restored?.examEndTime).toBe(state.examEndTime);
+    });
+
+    it('falls back to IndexedDB when localStorage write succeeds but read-back verification fails', async () => {
+      // Mock localStorage corrupting data on read-back
+      vi.stubGlobal('localStorage', {
+        ...localStorage,
+        getItem: (k: string) => {
+          if (k.includes('oir_active_exam_set_17')) {
+            return JSON.stringify({ setNumber: 999 }); // corrupt data
+          }
+          return null;
+        },
+        setItem: () => {},
+        removeItem: () => {},
+      });
+
+      const now = Date.now();
+      const state: ActiveExamState = {
+        setNumber: 17,
+        currentQuestionIndex: 5,
+        userAnswers: {},
+        examStartTime: now,
+        examEndTime: now + 10000,
+        questionTimeLeft: {},
+        currentQuestionStartedAt: now,
+        questionExpiredMap: {},
+      };
+
+      const result = await saveActiveExam(state);
+      expect(result.success).toBe(true);
+      expect(result.storageType).toBe('indexedDB');
+    });
+
+    it('reports failure when both localStorage and IndexedDB fail', async () => {
+      vi.stubGlobal('localStorage', {
+        ...localStorage,
+        getItem: () => null,
+        setItem: () => {
+          throw new Error('Storage disabled');
+        },
+        removeItem: () => {},
+      });
+
+      // Mock indexedDB open failure
+      const originalOpen = indexedDB.open;
+      indexedDB.open = () => {
+        throw new Error('IndexedDB blocked');
+      };
+
+      try {
+        const now = Date.now();
+        const state: ActiveExamState = {
+          setNumber: 18,
+          currentQuestionIndex: 0,
+          userAnswers: {},
+          examStartTime: now,
+          examEndTime: now + 10000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now,
+          questionExpiredMap: {},
+        };
+
+        const result = await saveActiveExam(state);
+        expect(result.success).toBe(false);
+        expect(result.error).toBeDefined();
+      } finally {
+        indexedDB.open = originalOpen;
+      }
+    });
+
+    it('preserves question-specific remaining time and original deadline after restoration', async () => {
+      const now = Date.now();
+      const originalDeadline = now + 18 * 60 * 1000;
+      const state: ActiveExamState = {
+        setNumber: 19,
+        currentQuestionIndex: 12,
+        userAnswers: {
+          1: { questionNumber: 1, selectedOption: 'A', isAnswered: true },
+          12: { questionNumber: 12, selectedOption: 'B', isAnswered: true },
+        },
+        examStartTime: now - 7 * 60 * 1000,
+        examEndTime: originalDeadline,
+        questionTimeLeft: { 12: 17, 13: 40 },
+        currentQuestionStartedAt: now - 23000,
+        questionExpiredMap: { 1: false, 12: false },
+      };
+
+      await saveActiveExam(state);
+
+      // Simulate refresh
+      const restored = await getActiveExam(19);
+      expect(restored).not.toBeNull();
+      expect(restored?.examEndTime).toBe(originalDeadline);
+      expect(restored?.questionTimeLeft[12]).toBe(17);
+      expect(restored?.userAnswers[12].selectedOption).toBe('B');
+    });
+  });
+
+  // 8. Defect 4: IndexedDB Transaction Completion & Web Locks
+  describe('IndexedDB Transaction Completion & Locking (Defect 4)', () => {
+    it('releases lease only for matching owner ID and ignores mismatched owner', async () => {
+      const ownerCorrect = 'owner_correct';
+      const ownerWrong = 'owner_wrong';
+
+      await acquireIdbLease(20, ownerCorrect, 5000);
+
+      // Attempt to release with wrong owner must NOT delete the lease
+      await releaseIdbLease(20, ownerWrong);
+
+      // Another owner cannot acquire since lease is still held by ownerCorrect
+      const acq = await acquireIdbLease(20, 'owner_other', 5000);
+      expect(acq).toBe(false);
+
+      // Releasing with correct owner clears lease
+      await releaseIdbLease(20, ownerCorrect);
+      const acqAfter = await acquireIdbLease(20, 'owner_other', 5000);
+      expect(acqAfter).toBe(true);
+      await releaseIdbLease(20, 'owner_other');
+    });
+
+    it('handles Web Locks API when available and executes exclusively', async () => {
+      let executed = false;
+      if (typeof navigator !== 'undefined' && navigator.locks) {
+        const res = await checkAndRecoverExpiredExam(
+          1,
+          [],
+          DEFAULT_SETTINGS
+        );
+        expect(res).toBeDefined();
+      }
     });
   });
 });

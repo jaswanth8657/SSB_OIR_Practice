@@ -76,6 +76,55 @@ export const App: React.FC = () => {
     setOverallStats(getOverallStats());
   };
 
+  // Defect 5: Listen for cross-tab recovery coordination via BroadcastChannel and storage events
+  useEffect(() => {
+    const handleRecoverySync = (data: any) => {
+      if (!data || data.type !== 'EXAM_RECOVERED' || typeof data.setNumber !== 'number') {
+        return;
+      }
+      const setNum = data.setNumber;
+      refreshUserData();
+      setRecoveryErrors((prev) => {
+        if (!prev[setNum]) return prev;
+        const updated = { ...prev };
+        delete updated[setNum];
+        return updated;
+      });
+    };
+
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel('oir_recovery_channel');
+        bc.onmessage = (event) => {
+          handleRecoverySync(event.data);
+        };
+      } catch {
+        bc = null;
+      }
+    }
+
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (e.key === 'oir_recovery_sync_event' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          handleRecoverySync(parsed);
+        } catch {
+          // Ignore
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageEvent);
+
+    return () => {
+      if (bc) {
+        bc.close();
+      }
+      window.removeEventListener('storage', handleStorageEvent);
+    };
+  }, []);
+
   // Check for any expired exams on mount, recover them, and automatically display Results (Tasks 2, 3, 4)
   useEffect(() => {
     let isCancelled = false;
@@ -85,15 +134,18 @@ export const App: React.FC = () => {
       const newErrors: Record<number, string> = {};
 
       for (let s = 1; s <= 20; s++) {
-        const active = getActiveExam(s);
+        const active = await getActiveExam(s);
         if (active && active.examEndTime <= Date.now()) {
           const qList = getQuestionsForSet(s);
           try {
             const res = await checkAndRecoverExpiredExam(s, qList, settings);
             if (res.status === 'recovered' || res.status === 'already_recovered') {
               recoveredList.push(res.attempt);
-            } else if (res.status === 'storage_error' || res.status === 'lock_unavailable') {
-              newErrors[s] = res.message;
+            } else if (res.status === 'storage_error' || res.status === 'lock_unavailable' || res.status === 'recovery_in_progress') {
+              newErrors[s] =
+                res.status === 'recovery_in_progress'
+                  ? `Recovery for Set ${s} is in progress in another tab.`
+                  : res.message;
             }
           } catch (err: any) {
             newErrors[s] = err?.message || `Failed to recover examination for Set ${s}`;
@@ -135,7 +187,7 @@ export const App: React.FC = () => {
     setActiveQuestions(questions);
 
     // Check if there is an active saved exam for this set
-    const savedExam = getActiveExam(setNumber);
+    const savedExam = await getActiveExam(setNumber);
     if (savedExam) {
       // Check if it has expired while user was away
       if (savedExam.examEndTime <= Date.now()) {
@@ -147,20 +199,42 @@ export const App: React.FC = () => {
               delete updated[setNumber];
               return updated;
             });
+            refreshUserData();
             handleExamFinish(res.attempt);
             return;
-          } else if (res.status === 'storage_error' || res.status === 'lock_unavailable') {
-            setRecoveryErrors((prev) => ({ ...prev, [setNumber]: res.message }));
+          } else if (
+            res.status === 'storage_error' ||
+            res.status === 'lock_unavailable' ||
+            res.status === 'recovery_in_progress'
+          ) {
+            // DEFECT 2: CRITICAL - MUST REMAIN ON DASHBOARD!
+            setRecoveryErrors((prev) => ({
+              ...prev,
+              [setNumber]:
+                res.status === 'recovery_in_progress'
+                  ? `Recovery for Set ${setNumber} is in progress in another tab.`
+                  : res.message,
+            }));
+            refreshUserData();
+            return; // Never navigate to exam or start a fresh session!
+          } else if (res.status === 'no_active_exam') {
+            refreshUserData();
+            return; // Another tab completed recovery; stay on dashboard
           }
         } catch (err: any) {
           setRecoveryErrors((prev) => ({
             ...prev,
             [setNumber]: err?.message || `Failed to recover examination for Set ${setNumber}`,
           }));
+          refreshUserData();
+          return;
         }
+      } else {
+        // Unexpired active exam: safely resume
+        setResumedExamState(savedExam);
+        setCurrentView('exam');
+        return;
       }
-      setResumedExamState(savedExam);
-      setCurrentView('exam');
     } else {
       setResumedExamState(null);
       setCurrentView('start_modal');

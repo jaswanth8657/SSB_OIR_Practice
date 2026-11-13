@@ -76,9 +76,9 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
     return initialMap;
   });
 
-  // Overall test timers
+  // Overall test timers: preserved existing valid deadline even when expired (Defect 2)
   const [examEndTime] = useState<number>(() => {
-    if (initialState?.examEndTime && initialState.examEndTime > Date.now()) {
+    if (initialState?.examEndTime) {
       return initialState.examEndTime;
     }
     return Date.now() + settings.totalDurationMinutes * 60 * 1000;
@@ -128,6 +128,10 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
   // TASK 1: Submission persistence error state & saving indicator
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  // DEFECT 3: Active examination persistence warning and retry state
+  const [storageWarning, setStorageWarning] = useState<string | null>(null);
+  const [isRetryingSave, setIsRetryingSave] = useState<boolean>(false);
 
   // Current question object
   const currentQuestion = questions[currentIndex] || questions[0];
@@ -388,8 +392,42 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
       currentQuestionStartedAt,
       questionExpiredMap,
     };
-    saveActiveExam(activeState);
+    saveActiveExam(activeState).then((res) => {
+      if (!res.success) {
+        setStorageWarning(
+          `Your latest examination changes for Set ${setNumber} could not be saved to browser storage. Your current answers remain visible on this screen, but they may not survive a page refresh. Please restore browser storage availability and retry saving.`
+        );
+      } else {
+        setStorageWarning(null);
+      }
+    });
   }, [setNumber, currentIndex, userAnswers, examEndTime, questionTimeLeft, currentQuestionStartedAt, questionExpiredMap, settings]);
+
+  const handleRetrySaveActive = async () => {
+    setIsRetryingSave(true);
+    const activeState: ActiveExamState = {
+      setNumber,
+      currentQuestionIndex: currentIndex,
+      userAnswers,
+      examStartTime: examEndTime - settings.totalDurationMinutes * 60 * 1000,
+      examEndTime,
+      questionTimeLeft,
+      currentQuestionStartedAt,
+      questionExpiredMap,
+    };
+    try {
+      const res = await saveActiveExam(activeState);
+      if (res.success) {
+        setStorageWarning(null);
+      } else {
+        setStorageWarning(
+          `Your latest examination changes for Set ${setNumber} could not be saved to browser storage. Your current answers remain visible on this screen, but they may not survive a page refresh. Please restore browser storage availability and retry saving.`
+        );
+      }
+    } finally {
+      setIsRetryingSave(false);
+    }
+  };
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -479,6 +517,30 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
 
       {/* ----------------- QUESTION BODY ----------------- */}
       <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 flex flex-col justify-between">
+        {/* DEFECT 3: Active examination persistence failure warning banner */}
+        {storageWarning && (
+          <div
+            role="alert"
+            aria-live="polite"
+            className="mb-4 p-4 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+          >
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-xs sm:text-sm">
+                <span className="font-bold block sm:inline">Storage Warning: </span>
+                {storageWarning}
+              </div>
+            </div>
+            <button
+              onClick={handleRetrySaveActive}
+              disabled={isRetryingSave}
+              className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white font-semibold text-xs transition shadow shrink-0 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              {isRetryingSave ? 'Saving...' : 'Retry Saving'}
+            </button>
+          </div>
+        )}
+
         <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-7 shadow-sm space-y-6">
           {/* Metadata & Discrepancy Alert */}
           <div className="space-y-2">

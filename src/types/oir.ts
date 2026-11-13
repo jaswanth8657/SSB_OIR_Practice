@@ -89,6 +89,19 @@ export type RecoveryResult =
   | { status: 'storage_error'; setNumber: number; message: string }
   | { status: 'lock_unavailable'; setNumber: number; message: string };
 
+export interface ActiveExamSaveResult {
+  success: boolean;
+  storageType?: 'localStorage' | 'indexedDB';
+  error?: string;
+}
+
+export interface RecoveryBroadcastMessage {
+  type: 'EXAM_RECOVERED';
+  setNumber: number;
+  attemptId: string;
+  timestamp: number;
+}
+
 export interface UserSettings {
   questionTimeSeconds: number;
   totalDurationMinutes: number;
