@@ -305,6 +305,11 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
                             src={imgSrc}
                             alt={`Q${q.questionNumber} Diagram ${iIdx + 1}`}
                             className="max-h-40 sm:max-h-48 object-contain"
+                            loading="lazy"
+                            decoding="async"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLElement).style.display = 'none';
+                            }}
                           />
                         </div>
                       ))}
@@ -399,6 +404,11 @@ export const SolutionsPage: React.FC<SolutionsPageProps> = ({
                               src={solImg}
                               alt={`Q${q.questionNumber} Solved Diagram ${sIdx + 1}`}
                               className="max-h-36 sm:max-h-44 object-contain"
+                              loading="lazy"
+                              decoding="async"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLElement).style.display = 'none';
+                              }}
                             />
                           </div>
                         ))}

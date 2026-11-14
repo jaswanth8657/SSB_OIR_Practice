@@ -26,6 +26,7 @@ interface DashboardProps {
   onSelectSet: (setNumber: number) => void;
   onViewSolutionsForSet: (setNumber: number) => void;
   onRetryRecovery?: (setNumber: number) => void;
+  onPrefetchSet?: (setNumber: number) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -37,22 +38,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onSelectSet,
   onViewSolutionsForSet,
   onRetryRecovery,
+  onPrefetchSet,
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterTab, setFilterTab] = useState<'all' | 'completed' | 'not_started'>('all');
 
-  const filteredSets = sets.filter((s) => {
-    const p = progressMap[s.setNumber];
-    const matchesSearch =
-      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      `set ${s.setNumber}`.includes(searchQuery.toLowerCase()) ||
-      `set ${s.setNumber.toString().padStart(2, '0')}`.includes(searchQuery.toLowerCase());
+  const filteredSets = React.useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return sets.filter((s) => {
+      const p = progressMap[s.setNumber];
+      const matchesSearch =
+        !query ||
+        s.name.toLowerCase().includes(query) ||
+        `set ${s.setNumber}`.includes(query) ||
+        `set ${s.setNumber.toString().padStart(2, '0')}`.includes(query);
 
-    if (!matchesSearch) return false;
-    if (filterTab === 'completed') return p?.status === 'completed';
-    if (filterTab === 'not_started') return !p || p.status === 'not_started';
-    return true;
-  });
+      if (!matchesSearch) return false;
+      if (filterTab === 'completed') return p?.status === 'completed';
+      if (filterTab === 'not_started') return !p || p.status === 'not_started';
+      return true;
+    });
+  }, [sets, progressMap, searchQuery, filterTab]);
 
   return (
     <div className="space-y-10 pb-16 text-slate-900">
@@ -317,6 +323,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
             return (
               <div
                 key={set.setNumber}
+                onMouseEnter={() => onPrefetchSet?.(set.setNumber)}
+                onFocus={() => onPrefetchSet?.(set.setNumber)}
                 className={`group relative rounded-2xl border p-5 transition-all duration-200 flex flex-col justify-between ${cardClasses}`}
               >
                 <div>

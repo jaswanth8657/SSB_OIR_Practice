@@ -1,11 +1,30 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
-import { TestStartModal } from './components/TestStartModal';
 import { ExamInterface } from './components/ExamInterface';
-import { ResultsPage } from './components/ResultsPage';
-import { SolutionsPage } from './components/SolutionsPage';
-import { SettingsModal } from './components/SettingsModal';
+
+// Code-split heavy routes and modals to ensure fast initial page load & small bundle footprint
+const TestStartModal = lazy(() =>
+  import('./components/TestStartModal').then((m) => ({ default: m.TestStartModal }))
+);
+const ResultsPage = lazy(() =>
+  import('./components/ResultsPage').then((m) => ({ default: m.ResultsPage }))
+);
+const SolutionsPage = lazy(() =>
+  import('./components/SolutionsPage').then((m) => ({ default: m.SolutionsPage }))
+);
+const SettingsModal = lazy(() =>
+  import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal }))
+);
+
+const ViewFallback: React.FC = () => (
+  <div className="min-h-[50vh] flex items-center justify-center p-8">
+    <div className="flex flex-col items-center gap-3">
+      <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      <span className="text-xs font-semibold text-slate-500">Loading view...</span>
+    </div>
+  </div>
+);
 
 import {
   PracticeSetMeta,
@@ -17,7 +36,12 @@ import {
   OverallStats,
 } from './types/oir';
 
-import { getSetsSummary, getQuestionsForSet } from './data/oirLoader';
+import {
+  getSetsSummary,
+  getQuestionsForSet,
+  getQuestionsForSetAsync,
+  prefetchQuestionsForSet,
+} from './data/oirLoader';
 import {
   getUserSettings,
   saveUserSettings,
@@ -172,7 +196,7 @@ export const App: React.FC = () => {
       for (let s = 1; s <= 20; s++) {
         const active = await getActiveExam(s);
         if (active && active.examEndTime <= Date.now()) {
-          const qList = getQuestionsForSet(s);
+          const qList = await getQuestionsForSetAsync(s);
           try {
             const res = await checkAndRecoverExpiredExam(s, qList, settings);
             if (res.status === 'recovered' || res.status === 'already_recovered') {
@@ -201,7 +225,8 @@ export const App: React.FC = () => {
         recoveredList.sort((a, b) => b.timestamp - a.timestamp);
         const latest = recoveredList[0];
         setActiveSetNumber(latest.setNumber);
-        setActiveQuestions(getQuestionsForSet(latest.setNumber));
+        const latestQuestions = await getQuestionsForSetAsync(latest.setNumber);
+        setActiveQuestions(latestQuestions);
         setActiveAttempt(latest);
         setCurrentView('results');
       }
@@ -219,7 +244,7 @@ export const App: React.FC = () => {
   // Click on a set card from the Dashboard
   const handleSelectSet = async (setNumber: number) => {
     setActiveSetNumber(setNumber);
-    const questions = getQuestionsForSet(setNumber);
+    const questions = await getQuestionsForSetAsync(setNumber);
     setActiveQuestions(questions);
 
     // Check if there is an active saved exam for this set
@@ -279,7 +304,7 @@ export const App: React.FC = () => {
 
   // Retry recovery for a specific set (Task 4)
   const handleRetryRecovery = async (setNumber: number) => {
-    const questions = getQuestionsForSet(setNumber);
+    const questions = await getQuestionsForSetAsync(setNumber);
     try {
       const res = await checkAndRecoverExpiredExam(setNumber, questions, settings);
       if (res.status === 'recovered' || res.status === 'already_recovered') {
@@ -306,7 +331,7 @@ export const App: React.FC = () => {
     const totalDurationMs = settings.totalDurationMinutes * 60 * 1000;
     const now = Date.now();
     const newSessionId = `sess_${activeSetNumber}_${now}_${Math.random().toString(36).substring(2, 9)}`;
-    const questions = activeQuestions.length > 0 ? activeQuestions : getQuestionsForSet(activeSetNumber);
+    const questions = activeQuestions.length > 0 ? activeQuestions : await getQuestionsForSetAsync(activeSetNumber);
     const initialMap: Record<number, any> = {};
     const initialTimeLeft: Record<number, number> = {};
     questions.forEach((q) => {
@@ -354,9 +379,9 @@ export const App: React.FC = () => {
   };
 
   // Review solutions from Results page or Dashboard card
-  const handleViewSolutions = (setNumber: number, attempt?: TestAttempt) => {
+  const handleViewSolutions = async (setNumber: number, attempt?: TestAttempt) => {
     setActiveSetNumber(setNumber);
-    const questions = getQuestionsForSet(setNumber);
+    const questions = await getQuestionsForSetAsync(setNumber);
     setActiveQuestions(questions);
 
     if (attempt) {
@@ -376,7 +401,7 @@ export const App: React.FC = () => {
   // Attempt Again
   const handleAttemptAgain = async (setNumber: number) => {
     setActiveSetNumber(setNumber);
-    const questions = getQuestionsForSet(setNumber);
+    const questions = await getQuestionsForSetAsync(setNumber);
     setActiveQuestions(questions);
 
     const totalDurationMs = settings.totalDurationMinutes * 60 * 1000;
@@ -422,21 +447,21 @@ export const App: React.FC = () => {
   };
 
   // Next Set / Previous Set from Results
-  const handleGoNextSet = () => {
+  const handleGoNextSet = async () => {
     if (activeSetNumber < 20) {
       const nextNum = activeSetNumber + 1;
       setActiveSetNumber(nextNum);
-      const questions = getQuestionsForSet(nextNum);
+      const questions = await getQuestionsForSetAsync(nextNum);
       setActiveQuestions(questions);
       setCurrentView('start_modal');
     }
   };
 
-  const handleGoPreviousSet = () => {
+  const handleGoPreviousSet = async () => {
     if (activeSetNumber > 1) {
       const prevNum = activeSetNumber - 1;
       setActiveSetNumber(prevNum);
-      const questions = getQuestionsForSet(prevNum);
+      const questions = await getQuestionsForSetAsync(prevNum);
       setActiveQuestions(questions);
       setCurrentView('start_modal');
     }
@@ -492,19 +517,22 @@ export const App: React.FC = () => {
               onSelectSet={handleSelectSet}
               onViewSolutionsForSet={(sNum) => handleViewSolutions(sNum)}
               onRetryRecovery={handleRetryRecovery}
+              onPrefetchSet={prefetchQuestionsForSet}
             />
           </div>
         )}
 
         {/* 2. TEST START SCREEN MODAL */}
         {currentView === 'start_modal' && activeSetMeta && (
-          <TestStartModal
-            setMeta={activeSetMeta}
-            settings={settings}
-            progress={progressMap[activeSetNumber]}
-            onStart={handleStartExam}
-            onBack={() => setCurrentView('dashboard')}
-          />
+          <Suspense fallback={<ViewFallback />}>
+            <TestStartModal
+              setMeta={activeSetMeta}
+              settings={settings}
+              progress={progressMap[activeSetNumber]}
+              onStart={handleStartExam}
+              onBack={() => setCurrentView('dashboard')}
+            />
+          </Suspense>
         )}
 
         {/* 3. TIMED EXAM INTERFACE */}
@@ -524,44 +552,52 @@ export const App: React.FC = () => {
 
         {/* 4. RESULTS PAGE */}
         {currentView === 'results' && activeAttempt && (
-          <ResultsPage
-            attempt={activeAttempt}
-            onViewSolutions={() => setCurrentView('solutions')}
-            onAttemptAgain={() => handleAttemptAgain(activeSetNumber)}
-            onGoDashboard={() => {
-              refreshUserData();
-              setCurrentView('dashboard');
-            }}
-            onGoPreviousSet={activeSetNumber > 1 ? handleGoPreviousSet : undefined}
-            onGoNextSet={activeSetNumber < 20 ? handleGoNextSet : undefined}
-            hasPreviousSet={activeSetNumber > 1}
-            hasNextSet={activeSetNumber < 20}
-          />
+          <Suspense fallback={<ViewFallback />}>
+            <ResultsPage
+              attempt={activeAttempt}
+              onViewSolutions={() => setCurrentView('solutions')}
+              onAttemptAgain={() => handleAttemptAgain(activeSetNumber)}
+              onGoDashboard={() => {
+                refreshUserData();
+                setCurrentView('dashboard');
+              }}
+              onGoPreviousSet={activeSetNumber > 1 ? handleGoPreviousSet : undefined}
+              onGoNextSet={activeSetNumber < 20 ? handleGoNextSet : undefined}
+              hasPreviousSet={activeSetNumber > 1}
+              hasNextSet={activeSetNumber < 20}
+            />
+          </Suspense>
         )}
 
         {/* 5. SOLUTIONS & EXPLANATIONS PAGE */}
         {currentView === 'solutions' && activeQuestions.length > 0 && (
-          <SolutionsPage
-            setNumber={activeSetNumber}
-            questions={activeQuestions}
-            attempt={activeAttempt || undefined}
-            onBackToResults={activeAttempt ? () => setCurrentView('results') : undefined}
-            onBackToDashboard={() => {
-              refreshUserData();
-              setCurrentView('dashboard');
-            }}
-          />
+          <Suspense fallback={<ViewFallback />}>
+            <SolutionsPage
+              setNumber={activeSetNumber}
+              questions={activeQuestions}
+              attempt={activeAttempt || undefined}
+              onBackToResults={activeAttempt ? () => setCurrentView('results') : undefined}
+              onBackToDashboard={() => {
+                refreshUserData();
+                setCurrentView('dashboard');
+              }}
+            />
+          </Suspense>
         )}
       </main>
 
       {/* ----------------- TIMER SETTINGS MODAL ----------------- */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        settings={settings}
-        onClose={() => setIsSettingsOpen(false)}
-        onSave={handleSaveSettings}
-        onReset={handleResetSettings}
-      />
+      {isSettingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            settings={settings}
+            onClose={() => setIsSettingsOpen(false)}
+            onSave={handleSaveSettings}
+            onReset={handleResetSettings}
+          />
+        </Suspense>
+      )}
 
       {/* ----------------- RESET CONFIRMATION MODAL ----------------- */}
       {isResetConfirmOpen && (

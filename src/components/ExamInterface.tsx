@@ -138,6 +138,85 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const [isRetryingSave, setIsRetryingSave] = useState<boolean>(false);
 
+  // Mutable refs for latest values to prevent interval restarts and unnecessary re-renders
+  const userAnswersRef = useRef(userAnswers);
+  userAnswersRef.current = userAnswers;
+
+  const currentIndexRef = useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
+
+  const questionTimeLeftRef = useRef(questionTimeLeft);
+  questionTimeLeftRef.current = questionTimeLeft;
+
+  const questionExpiredMapRef = useRef(questionExpiredMap);
+  questionExpiredMapRef.current = questionExpiredMap;
+
+  const currentQuestionStartedAtRef = useRef(currentQuestionStartedAt);
+  currentQuestionStartedAtRef.current = currentQuestionStartedAt;
+
+  const overallRemainingRef = useRef(overallRemaining);
+  overallRemainingRef.current = overallRemaining;
+
+  // Debouncing & coalescing state for background active exam persistence
+  const saveDebounceTimerRef = useRef<any>(null);
+  const inFlightSavePromiseRef = useRef<Promise<any> | null>(null);
+  const pendingSaveStateRef = useRef<ActiveExamState | null>(null);
+  const lastSavedJsonRef = useRef<string>('');
+
+  const buildActiveSnapshot = useCallback((): ActiveExamState => {
+    return {
+      setNumber,
+      currentQuestionIndex: currentIndexRef.current,
+      userAnswers: userAnswersRef.current,
+      examStartTime: examEndTime - settings.totalDurationMinutes * 60 * 1000,
+      examEndTime,
+      questionTimeLeft: questionTimeLeftRef.current,
+      currentQuestionStartedAt: currentQuestionStartedAtRef.current,
+      questionExpiredMap: questionExpiredMapRef.current,
+      sessionId: sessionIdRef.current,
+    };
+  }, [setNumber, examEndTime, settings.totalDurationMinutes]);
+
+  const executeSave = useCallback(async (stateToSave: ActiveExamState) => {
+    const json = JSON.stringify(stateToSave);
+    if (json === lastSavedJsonRef.current) {
+      return;
+    }
+
+    if (inFlightSavePromiseRef.current) {
+      pendingSaveStateRef.current = stateToSave;
+      return;
+    }
+
+    const savePromise = (async () => {
+      try {
+        const res = await saveActiveExam(stateToSave);
+        if (!res.success) {
+          setStorageWarning(
+            `Your latest examination changes for Set ${stateToSave.setNumber} could not be saved to browser storage. Your current answers remain visible on this screen, but they may not survive a page refresh. Please restore browser storage availability and retry saving.`
+          );
+        } else {
+          lastSavedJsonRef.current = json;
+          setStorageWarning(null);
+        }
+      } catch {
+        setStorageWarning(
+          `Your latest examination changes for Set ${stateToSave.setNumber} could not be saved to browser storage. Your current answers remain visible on this screen, but they may not survive a page refresh.`
+        );
+      } finally {
+        inFlightSavePromiseRef.current = null;
+        if (pendingSaveStateRef.current) {
+          const next = pendingSaveStateRef.current;
+          pendingSaveStateRef.current = null;
+          executeSave(next);
+        }
+      }
+    })();
+
+    inFlightSavePromiseRef.current = savePromise;
+    await savePromise;
+  }, []);
+
   // Current question object
   const currentQuestion = questions[currentIndex] || questions[0];
   const curQNum = currentQuestion.questionNumber;
@@ -157,10 +236,29 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
       setIsSaving(true);
       setSubmissionError(null);
 
+      // Cancel pending debounce timer and flush latest state
+      if (saveDebounceTimerRef.current) {
+        clearTimeout(saveDebounceTimerRef.current);
+        saveDebounceTimerRef.current = null;
+      }
+      try {
+        await executeSave(buildActiveSnapshot());
+      } catch {
+        // Continue to attempt saving
+      }
+      if (inFlightSavePromiseRef.current) {
+        try {
+          await inFlightSavePromiseRef.current;
+        } catch {
+          // Continue to attempt saving
+        }
+      }
+
       const totalTimeLimitSeconds = settings.totalDurationMinutes * 60;
+      const currentOverallRemaining = overallRemainingRef.current;
       const timeTaken = Math.min(
         totalTimeLimitSeconds,
-        Math.max(1, totalTimeLimitSeconds - overallRemaining)
+        Math.max(1, totalTimeLimitSeconds - currentOverallRemaining)
       );
 
       const examSessionStart = examEndTime - totalTimeLimitSeconds * 1000;
@@ -169,7 +267,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
       const attempt = buildTestAttempt(
         setNumber,
         questions,
-        userAnswers,
+        userAnswersRef.current,
         timeTaken,
         stableAttemptId,
         Date.now()
@@ -203,7 +301,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
       setIsSaving(false);
       onFinish(attempt);
     },
-    [questions, userAnswers, setNumber, settings, overallRemaining, examEndTime, onFinish]
+    [questions, setNumber, settings, examEndTime, onFinish, buildActiveSnapshot, executeSave]
   );
 
   // ----------------- NAVIGATION (TASK 1 & TASK 6) -----------------
@@ -212,15 +310,16 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
       if (targetIndex < 0 || targetIndex >= totalQuestions) return;
 
       const now = Date.now();
-      const fromQ = questions[currentIndex].questionNumber;
-      const toQ = questions[targetIndex].questionNumber;
+      const currentIdx = currentIndexRef.current;
+      const fromQ = questions[currentIdx]?.questionNumber || 1;
+      const toQ = questions[targetIndex]?.questionNumber || 1;
 
       const result = switchQuestionTimer(
         fromQ,
-        currentQuestionStartedAt,
+        currentQuestionStartedAtRef.current,
         toQ,
-        questionTimeLeft,
-        questionExpiredMap,
+        questionTimeLeftRef.current,
+        questionExpiredMapRef.current,
         settings.questionTimeSeconds,
         now
       );
@@ -231,7 +330,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
       setCurrentQuestionStartedAt(result.newStartedAt);
       setActiveQuestionRemaining(result.toQRemaining);
     },
-    [currentIndex, questions, totalQuestions, currentQuestionStartedAt, questionTimeLeft, questionExpiredMap, settings.questionTimeSeconds]
+    [questions, totalQuestions, settings.questionTimeSeconds]
   );
 
   const handleNext = () => {
@@ -353,91 +452,87 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
   };
 
   // ----------------- LIVE TIMER TICK (TASK 6 & TASK 7) -----------------
+  // Calculated from timestamps with 1000ms interval for smooth UI and zero timer drift
   useEffect(() => {
-    const interval = setInterval(() => {
+    const tick = () => {
       const now = Date.now();
 
       // 1. Overall Timer
       const oRem = Math.max(0, Math.floor((examEndTime - now) / 1000));
-      setOverallRemaining(oRem);
+      setOverallRemaining((prev) => (prev !== oRem ? oRem : prev));
 
       if (oRem <= 0) {
-        clearInterval(interval);
         submitExam('overall_timer_expired');
         return;
       }
 
       // 2. Active Question Timer (Task 1)
-      if (!questionExpiredMap[curQNum]) {
-        const budget = questionTimeLeft[curQNum] ?? settings.questionTimeSeconds;
+      const currentIdx = currentIndexRef.current;
+      const activeQ = questions[currentIdx] || questions[0];
+      const curQ = activeQ.questionNumber;
+      const expiredMap = questionExpiredMapRef.current;
+
+      if (!expiredMap[curQ]) {
+        const budget = questionTimeLeftRef.current[curQ] ?? settings.questionTimeSeconds;
         const { remainingSeconds, isExpired } = calculateQuestionRemaining(
-          currentQuestionStartedAt,
+          currentQuestionStartedAtRef.current,
           budget,
           now
         );
-        setActiveQuestionRemaining(remainingSeconds);
+        setActiveQuestionRemaining((prev) => (prev !== remainingSeconds ? remainingSeconds : prev));
 
         if (isExpired) {
           // Question expired!
-          setQuestionExpiredMap((prev) => ({ ...prev, [curQNum]: true }));
-          setQuestionTimeLeft((prev) => ({ ...prev, [curQNum]: 0 }));
+          setQuestionExpiredMap((prev) => ({ ...prev, [curQ]: true }));
+          setQuestionTimeLeft((prev) => ({ ...prev, [curQ]: 0 }));
 
           // Automatically advance to next question
-          if (currentIndex < totalQuestions - 1) {
-            switchQuestion(currentIndex + 1);
+          if (currentIdx < totalQuestions - 1) {
+            switchQuestion(currentIdx + 1);
           } else {
-            // Last question expired: check if all expired or submit
+            // Last question expired: submit exam
             submitExam('overall_timer_expired');
           }
         }
       } else {
-        setActiveQuestionRemaining(0);
+        setActiveQuestionRemaining((prev) => (prev !== 0 ? 0 : prev));
       }
-    }, 250);
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
 
     return () => clearInterval(interval);
-  }, [examEndTime, curQNum, currentQuestionStartedAt, questionTimeLeft, questionExpiredMap, settings.questionTimeSeconds, currentIndex, totalQuestions, switchQuestion, submitExam]);
+  }, [examEndTime, questions, settings.questionTimeSeconds, totalQuestions, switchQuestion, submitExam]);
 
-  // ----------------- STATE PERSISTENCE -----------------
+  // ----------------- STATE PERSISTENCE (DEBOUNCED & COALESCED) -----------------
   useEffect(() => {
-    const activeState: ActiveExamState = {
-      setNumber,
-      currentQuestionIndex: currentIndex,
-      userAnswers,
-      examStartTime: examEndTime - settings.totalDurationMinutes * 60 * 1000,
-      examEndTime,
-      questionTimeLeft,
-      currentQuestionStartedAt,
-      questionExpiredMap,
-      sessionId: sessionIdRef.current,
-    };
-    saveActiveExam(activeState).then((res) => {
-      if (!res.success) {
-        setStorageWarning(
-          `Your latest examination changes for Set ${setNumber} could not be saved to browser storage. Your current answers remain visible on this screen, but they may not survive a page refresh. Please restore browser storage availability and retry saving.`
-        );
-      } else {
-        setStorageWarning(null);
+    const activeState = buildActiveSnapshot();
+
+    if (saveDebounceTimerRef.current) {
+      clearTimeout(saveDebounceTimerRef.current);
+    }
+
+    // 250ms debounce coalesces bursts of typing or rapid clicking into a single write
+    saveDebounceTimerRef.current = setTimeout(() => {
+      saveDebounceTimerRef.current = null;
+      executeSave(activeState);
+    }, 250);
+
+    return () => {
+      if (saveDebounceTimerRef.current) {
+        clearTimeout(saveDebounceTimerRef.current);
       }
-    });
-  }, [setNumber, currentIndex, userAnswers, examEndTime, questionTimeLeft, currentQuestionStartedAt, questionExpiredMap, settings]);
+    };
+  }, [setNumber, currentIndex, userAnswers, examEndTime, questionTimeLeft, currentQuestionStartedAt, questionExpiredMap, settings, buildActiveSnapshot, executeSave]);
 
   const handleRetrySaveActive = async () => {
     setIsRetryingSave(true);
-    const activeState: ActiveExamState = {
-      setNumber,
-      currentQuestionIndex: currentIndex,
-      userAnswers,
-      examStartTime: examEndTime - settings.totalDurationMinutes * 60 * 1000,
-      examEndTime,
-      questionTimeLeft,
-      currentQuestionStartedAt,
-      questionExpiredMap,
-      sessionId: sessionIdRef.current,
-    };
+    const activeState = buildActiveSnapshot();
     try {
       const res = await saveActiveExam(activeState);
       if (res.success) {
+        lastSavedJsonRef.current = JSON.stringify(activeState);
         setStorageWarning(null);
       } else {
         setStorageWarning(
@@ -635,7 +730,11 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
                       src={imgSrc}
                       alt={`Q${currentQuestion.questionNumber} Diagram ${imgIdx + 1}`}
                       className="max-h-48 sm:max-h-60 object-contain transition-transform duration-200 group-hover:scale-105"
-                      loading="eager"
+                      loading="lazy"
+                      decoding="async"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLElement).style.display = 'none';
+                      }}
                     />
                   </div>
                 ))}

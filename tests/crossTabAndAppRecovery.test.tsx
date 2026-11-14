@@ -58,6 +58,12 @@ describe('Cross-Tab Recovery & App Navigation Resilience (Defect 2 & Defect 5)',
       await saveActiveExam(expiredExamState);
 
       // Force storage failure when saving attempt
+      const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation((k: string, v: string) => {
+        if (k === 'oir_test_attempts_v1') {
+          throw new Error('QuotaExceededError: storage full');
+        }
+        store[k] = String(v);
+      });
       vi.stubGlobal('localStorage', {
         ...localStorage,
         getItem: (k: string) => store[k] || null,
@@ -86,6 +92,8 @@ describe('Cross-Tab Recovery & App Navigation Resilience (Defect 2 & Defect 5)',
       // Must display recovery error banner on dashboard
       const retryButtons = await screen.findAllByRole('button', { name: /Retry Recovery/i });
       expect(retryButtons.length).toBeGreaterThan(0);
+
+      setItemSpy.mockRestore();
     });
 
     it('Defect 2: Unexpired exam resumes with its original deadline', async () => {
