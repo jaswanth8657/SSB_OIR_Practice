@@ -10,6 +10,10 @@ import {
   RecoveryBroadcastMessage,
   VersionedActiveExamRecord,
   ClearActiveExamResult,
+  StartActiveExamSessionResult,
+  IdbEnvelopeReadResult,
+  CommitFencedRecoveryParams,
+  CommitFencedRecoveryResult,
   RecoveryCheckpoint,
 } from '../types/oir';
 import { buildTestAttempt } from './scoring';
@@ -473,15 +477,18 @@ export function queueWrite<T>(setNumber: number, task: () => Promise<T>): Promis
 const WEB_LOCK_PREFIX = 'oir-exam-recovery-set-';
 const LEASE_TIMEOUT_MS = 30000;
 const LEASE_HEARTBEAT_MS = 10000;
-const IDB_DB_NAME = 'oir_hub_coordination';
-const IDB_STORE_LEASES = 'leases';
-const IDB_STORE_ACTIVE_EXAMS = 'active_exams';
-const IDB_VERSION = 2;
+export const IDB_DB_NAME = 'oir_hub_coordination';
+export const IDB_STORE_LEASES = 'leases';
+export const IDB_STORE_ACTIVE_EXAMS = 'active_exams';
+export const IDB_STORE_FENCE_COUNTERS = 'fence_counters';
+export const IDB_STORE_RECOVERED_ATTEMPTS = 'recovered_attempts';
+export const IDB_VERSION = 3;
 
 /**
- * Open or initialize coordination IndexedDB database with leases and active_exams stores.
+ * Open or initialize coordination IndexedDB database with leases, active_exams,
+ * fence_counters, and recovered_attempts stores.
  */
-function openCoordinationDb(): Promise<IDBDatabase> {
+export function openCoordinationDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
       return reject(new Error('IndexedDB not supported in current environment'));
@@ -495,6 +502,12 @@ function openCoordinationDb(): Promise<IDBDatabase> {
         }
         if (!db.objectStoreNames.contains(IDB_STORE_ACTIVE_EXAMS)) {
           db.createObjectStore(IDB_STORE_ACTIVE_EXAMS, { keyPath: 'setNumber' });
+        }
+        if (!db.objectStoreNames.contains(IDB_STORE_FENCE_COUNTERS)) {
+          db.createObjectStore(IDB_STORE_FENCE_COUNTERS, { keyPath: 'setNumber' });
+        }
+        if (!db.objectStoreNames.contains(IDB_STORE_RECOVERED_ATTEMPTS)) {
+          db.createObjectStore(IDB_STORE_RECOVERED_ATTEMPTS, { keyPath: 'attemptId' });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -590,11 +603,9 @@ export function validateStorageEnvelope(raw: unknown): VersionedActiveExamRecord
   if (obj.isDeleted !== undefined && typeof obj.isDeleted !== 'boolean') return null;
   const isDeleted = obj.isDeleted === true;
 
-  // sessionId: non-empty string, or fallback generated session id for legacy records
-  const sessionId =
-    typeof obj.sessionId === 'string' && obj.sessionId.trim()
-      ? obj.sessionId
-      : `sess_${obj.setNumber}_${obj.updatedAt || Date.now()}`;
+  // sessionId: strictly non-empty string for valid versioned envelopes
+  if (typeof obj.sessionId !== 'string' || !obj.sessionId.trim()) return null;
+  const sessionId = obj.sessionId.trim();
 
   // Tombstone envelope
   if (isDeleted) {
@@ -617,6 +628,9 @@ export function validateStorageEnvelope(raw: unknown): VersionedActiveExamRecord
 
   // state.setNumber must match envelope.setNumber
   if (state.setNumber !== obj.setNumber) return null;
+
+  // state.sessionId if present must match envelope sessionId
+  if (state.sessionId && state.sessionId !== sessionId) return null;
 
   // state.currentQuestionIndex must be integer 0..49
   if (!Number.isInteger(state.currentQuestionIndex) || state.currentQuestionIndex < 0 || state.currentQuestionIndex > 49) return null;
@@ -673,22 +687,49 @@ export function validateStorageEnvelope(raw: unknown): VersionedActiveExamRecord
 }
 
 /**
- * Explicit, safe migration for legacy unversioned active exam records.
- * Never allows a corrupted versioned envelope to accidentally enter legacy migration.
+ * Explicit, safe migration for legacy unversioned active exam records and older versioned envelopes without sessionId.
+ * Strictly rejects corrupted envelopes.
  */
 export function migrateLegacyActiveExam(raw: unknown): VersionedActiveExamRecord | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const obj = raw as Record<string, any>;
 
-  // A versioned envelope (or corrupted attempt at one) must never enter legacy migration
-  if ('storageVersion' in obj || 'revision' in obj || 'isDeleted' in obj) return null;
+  // Older versioned envelope without sessionId (Pass 5 / early records)
+  if ('storageVersion' in obj || 'revision' in obj || 'isDeleted' in obj) {
+    if (obj.storageVersion !== 1 && obj.storageVersion !== undefined) return null;
+    if (obj.isDeleted === true) return null; // Corrupted tombstone without sessionId cannot be migrated to active state
+    if (!obj.state || typeof obj.state !== 'object' || Array.isArray(obj.state)) return null;
+    if (!Number.isInteger(obj.setNumber) || obj.setNumber < 1 || obj.setNumber > 20) return null;
+    if (!Number.isInteger(obj.revision) || obj.revision <= 0) return null;
 
-  // Must be a valid legacy ActiveExamState
+    const state = obj.state as Record<string, any>;
+    if (!Number.isInteger(state.setNumber) || state.setNumber !== obj.setNumber) return null;
+    if (!Number.isInteger(state.currentQuestionIndex) || state.currentQuestionIndex < 0 || state.currentQuestionIndex > 49) return null;
+    if (!state.userAnswers || typeof state.userAnswers !== 'object' || Array.isArray(state.userAnswers)) return null;
+
+    const deterministicSessionId =
+      typeof obj.sessionId === 'string' && obj.sessionId.trim()
+        ? obj.sessionId.trim()
+        : `sess_${obj.setNumber}_${obj.updatedAt || state.examStartTime || Date.now()}_legacy`;
+
+    return {
+      setNumber: obj.setNumber,
+      revision: obj.revision,
+      updatedAt: obj.updatedAt || state.currentQuestionStartedAt || Date.now(),
+      sessionId: deterministicSessionId,
+      storageVersion: 1,
+      isDeleted: false,
+      state: { ...(state as ActiveExamState), sessionId: deterministicSessionId },
+    };
+  }
+
+  // Pure legacy unversioned ActiveExamState
   if (!Number.isInteger(obj.setNumber) || obj.setNumber < 1 || obj.setNumber > 20) return null;
   if (!Number.isInteger(obj.currentQuestionIndex) || obj.currentQuestionIndex < 0 || obj.currentQuestionIndex > 49) return null;
   if (!obj.userAnswers || typeof obj.userAnswers !== 'object' || Array.isArray(obj.userAnswers)) return null;
 
   const sessionId = `sess_${obj.setNumber}_${obj.examStartTime || Date.now()}_legacy`;
+  const state: ActiveExamState = { ...(obj as ActiveExamState), sessionId };
   return {
     setNumber: obj.setNumber,
     revision: 1,
@@ -696,7 +737,7 @@ export function migrateLegacyActiveExam(raw: unknown): VersionedActiveExamRecord
     sessionId,
     storageVersion: 1,
     isDeleted: false,
-    state: obj as ActiveExamState,
+    state,
   };
 }
 
@@ -747,33 +788,64 @@ export function writeLocalActiveExamEnvelope(envelope: VersionedActiveExamRecord
 }
 
 /**
+ * Authoritatively read versioned envelope from IndexedDB with typed status.
+ * Distinguishes 'found', 'absent', 'unsupported', and 'error' so callers can fail closed.
+ */
+export function readIdbActiveExamEnvelopeDetailed(setNumber: number): Promise<IdbEnvelopeReadResult> {
+  return new Promise((resolve) => {
+    if (typeof indexedDB === 'undefined') {
+      return resolve({ status: 'unsupported' });
+    }
+    openCoordinationDb()
+      .then((db) => {
+        try {
+          const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readonly');
+          const store = tx.objectStore(IDB_STORE_ACTIVE_EXAMS);
+          const req = store.get(setNumber);
+          req.onsuccess = () => {
+            if (req.result === undefined) {
+              resolve({ status: 'absent' });
+              return;
+            }
+            const validated = parseEnvelopeOrMigrate(req.result);
+            if (validated) {
+              resolve({ status: 'found', envelope: validated });
+            } else {
+              resolve({ status: 'error', error: 'Corrupt active exam envelope in IndexedDB' });
+            }
+          };
+          req.onerror = () => {
+            resolve({ status: 'error', error: req.error?.message || 'IndexedDB get failed' });
+          };
+          tx.oncomplete = () => db.close();
+          tx.onerror = () => {
+            db.close();
+            resolve({ status: 'error', error: tx.error?.message || 'IndexedDB transaction failed' });
+          };
+          tx.onabort = () => {
+            db.close();
+            resolve({ status: 'error', error: 'IndexedDB transaction aborted' });
+          };
+        } catch (err: any) {
+          db.close();
+          resolve({ status: 'error', error: err?.message || 'IndexedDB transaction creation failed' });
+        }
+      })
+      .catch((err: any) => {
+        resolve({ status: 'error', error: err?.message || 'Failed to open IndexedDB' });
+      });
+  });
+}
+
+/**
  * Read versioned envelope from IndexedDB.
  */
-export function readIdbActiveExamEnvelope(setNumber: number): Promise<VersionedActiveExamRecord | null> {
-  return new Promise(async (resolve) => {
-    try {
-      const db = await openCoordinationDb();
-      const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readonly');
-      const store = tx.objectStore(IDB_STORE_ACTIVE_EXAMS);
-      const req = store.get(setNumber);
-      req.onsuccess = () => {
-        const validated = parseEnvelopeOrMigrate(req.result);
-        resolve(validated);
-      };
-      req.onerror = () => resolve(null);
-      tx.oncomplete = () => db.close();
-      tx.onerror = () => {
-        db.close();
-        resolve(null);
-      };
-      tx.onabort = () => {
-        db.close();
-        resolve(null);
-      };
-    } catch {
-      resolve(null);
-    }
-  });
+export async function readIdbActiveExamEnvelope(setNumber: number): Promise<VersionedActiveExamRecord | null> {
+  const res = await readIdbActiveExamEnvelopeDetailed(setNumber);
+  if (res.status === 'found' && res.envelope) {
+    return res.envelope;
+  }
+  return null;
 }
 
 /**
@@ -806,12 +878,23 @@ export function getActiveExamSync(setNumber: number): ActiveExamState | null {
 }
 
 /**
- * Asynchronously retrieve active examination state with dual-store revision comparison
- * and automatic stale storage repair. Releases quarantine upon completion.
+ * Asynchronously retrieve active examination state with dual-store revision comparison,
+ * fail-closed IndexedDB protection, and awaited replica repair. Releases quarantine upon completion.
  */
 export async function getActiveExam(setNumber: number): Promise<ActiveExamState | null> {
+  const idbReadRes = await readIdbActiveExamEnvelopeDetailed(setNumber);
+
+  // FAIL-CLOSED: If IndexedDB is supported but returns an error, do NOT fall back to localStorage
+  if (idbReadRes.status === 'error') {
+    releaseSetQuarantine(setNumber);
+    return null;
+  }
+
   const localEnv = readLocalActiveExamEnvelope(setNumber);
-  const idbEnv = await readIdbActiveExamEnvelope(setNumber);
+  let idbEnv: VersionedActiveExamRecord | null = null;
+  if (idbReadRes.status === 'found' && idbReadRes.envelope) {
+    idbEnv = idbReadRes.envelope;
+  }
 
   let winner: VersionedActiveExamRecord | null = null;
 
@@ -822,13 +905,26 @@ export async function getActiveExam(setNumber: number): Promise<ActiveExamState 
       writeLocalActiveExamEnvelope(idbEnv);
     } else if (localEnv.revision > idbEnv.revision) {
       winner = localEnv;
-      // Stale IDB detected: repair with newer local record inside IDB transaction
+      // Stale IDB detected: repair with newer local record inside awaited IDB transaction
       if (typeof indexedDB !== 'undefined') {
         try {
           const db = await openCoordinationDb();
-          const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
-          tx.objectStore(IDB_STORE_ACTIVE_EXAMS).put(localEnv);
-          tx.oncomplete = () => db.close();
+          await new Promise<void>((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
+            tx.objectStore(IDB_STORE_ACTIVE_EXAMS).put(localEnv);
+            tx.oncomplete = () => {
+              db.close();
+              resolve();
+            };
+            tx.onerror = () => {
+              db.close();
+              reject(tx.error);
+            };
+            tx.onabort = () => {
+              db.close();
+              reject(new Error('Tx aborted'));
+            };
+          });
         } catch {
           // Ignore background repair failure
         }
@@ -843,9 +939,22 @@ export async function getActiveExam(setNumber: number): Promise<ActiveExamState 
         if (typeof indexedDB !== 'undefined') {
           try {
             const db = await openCoordinationDb();
-            const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
-            tx.objectStore(IDB_STORE_ACTIVE_EXAMS).put(localEnv);
-            tx.oncomplete = () => db.close();
+            await new Promise<void>((resolve, reject) => {
+              const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
+              tx.objectStore(IDB_STORE_ACTIVE_EXAMS).put(localEnv);
+              tx.oncomplete = () => {
+                db.close();
+                resolve();
+              };
+              tx.onerror = () => {
+                db.close();
+                reject(tx.error);
+              };
+              tx.onabort = () => {
+                db.close();
+                reject(new Error('Tx aborted'));
+              };
+            });
           } catch {
             // Ignore
           }
@@ -856,16 +965,32 @@ export async function getActiveExam(setNumber: number): Promise<ActiveExamState 
     winner = idbEnv;
     writeLocalActiveExamEnvelope(idbEnv);
   } else if (localEnv) {
-    winner = localEnv;
-    if (typeof indexedDB !== 'undefined') {
+    if (idbReadRes.status === 'absent' && typeof indexedDB !== 'undefined') {
+      // IDB was queried and returned absent, but localEnv exists. Repair IDB authoritatively.
+      winner = localEnv;
       try {
         const db = await openCoordinationDb();
-        const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
-        tx.objectStore(IDB_STORE_ACTIVE_EXAMS).put(localEnv);
-        tx.oncomplete = () => db.close();
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
+          tx.objectStore(IDB_STORE_ACTIVE_EXAMS).put(localEnv);
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => {
+            db.close();
+            reject(tx.error);
+          };
+          tx.onabort = () => {
+            db.close();
+            reject(new Error('Tx aborted'));
+          };
+        });
       } catch {
         // Ignore
       }
+    } else {
+      winner = localEnv;
     }
   }
 
@@ -897,8 +1022,184 @@ export async function hydrateActiveExamCache(): Promise<void> {
 }
 
 /**
+ * Explicit, authorized creation or restart of an active examination session.
+ * This is the ONLY authorized mechanism to replace an existing session or start a new retake/exam.
+ * Supports compare-and-set via expectedPreviousSessionId.
+ */
+export async function startActiveExamSession(
+  setNumber: number,
+  newSessionId: string,
+  initialState: ActiveExamState,
+  expectedPreviousSessionId?: string
+): Promise<StartActiveExamSessionResult> {
+  if (!newSessionId || typeof newSessionId !== 'string' || !newSessionId.trim()) {
+    return { success: false, error: 'Cannot start active exam session: valid newSessionId is required' };
+  }
+
+  const cleanSessionId = newSessionId.trim();
+  const stateSnapshot: ActiveExamState = JSON.parse(JSON.stringify(initialState));
+  stateSnapshot.setNumber = setNumber;
+  stateSnapshot.sessionId = cleanSessionId;
+
+  return queueWrite(setNumber, async () => {
+    // 1. Authoritative write to IndexedDB
+    if (typeof indexedDB !== 'undefined') {
+      try {
+        const idbResult = await new Promise<{ success: boolean; envelope?: VersionedActiveExamRecord; error?: string }>(
+          async (resolve) => {
+            try {
+              const db = await openCoordinationDb();
+              const tx = db.transaction(IDB_STORE_ACTIVE_EXAMS, 'readwrite');
+              const store = tx.objectStore(IDB_STORE_ACTIVE_EXAMS);
+              const getReq = store.get(setNumber);
+
+              let committedEnvelope: VersionedActiveExamRecord | null = null;
+              let rejectReason: string | null = null;
+
+              getReq.onsuccess = () => {
+                const existing = parseEnvelopeOrMigrate(getReq.result);
+
+                // Idempotency: if already started and active with cleanSessionId
+                if (existing && !existing.isDeleted && existing.sessionId === cleanSessionId) {
+                  committedEnvelope = existing;
+                  return;
+                }
+
+                // If expectedPreviousSessionId was specified, verify match
+                if (expectedPreviousSessionId !== undefined && existing) {
+                  if (existing.sessionId !== expectedPreviousSessionId) {
+                    rejectReason = `Cannot start new exam session: expected previous session ${expectedPreviousSessionId} but found ${existing.sessionId}`;
+                    return;
+                  }
+                }
+
+                // Check localStorage revision
+                const localEnv = readLocalActiveExamEnvelope(setNumber);
+                let currentMaxRev = existing ? existing.revision : 0;
+                if (localEnv && localEnv.revision > currentMaxRev) {
+                  currentMaxRev = localEnv.revision;
+                }
+
+                const nextRev = currentMaxRev + 1;
+                committedEnvelope = {
+                  setNumber,
+                  revision: nextRev,
+                  updatedAt: Date.now(),
+                  sessionId: cleanSessionId,
+                  storageVersion: 1,
+                  isDeleted: false,
+                  state: stateSnapshot,
+                };
+
+                const putReq = store.put(committedEnvelope);
+                putReq.onerror = () => {
+                  rejectReason = putReq.error?.message || 'IndexedDB store put failed';
+                };
+              };
+
+              getReq.onerror = () => {
+                rejectReason = getReq.error?.message || 'IndexedDB store get failed';
+              };
+
+              tx.oncomplete = () => {
+                db.close();
+                if (rejectReason) {
+                  resolve({ success: false, error: rejectReason });
+                  return;
+                }
+                if (!committedEnvelope) {
+                  resolve({ success: false, error: 'Transaction completed without commit' });
+                  return;
+                }
+                resolve({ success: true, envelope: committedEnvelope });
+              };
+
+              tx.onerror = () => {
+                db.close();
+                resolve({ success: false, error: tx.error?.message || 'IndexedDB transaction failed' });
+              };
+
+              tx.onabort = () => {
+                db.close();
+                resolve({ success: false, error: 'IndexedDB transaction aborted' });
+              };
+            } catch (err: any) {
+              resolve({ success: false, error: err?.message || 'Failed to open IndexedDB' });
+            }
+          }
+        );
+
+        if (idbResult.success && idbResult.envelope) {
+          // Read-back verification from IDB
+          const readBack = await readIdbActiveExamEnvelope(setNumber);
+          if (
+            readBack &&
+            readBack.revision === idbResult.envelope.revision &&
+            readBack.sessionId === cleanSessionId &&
+            !readBack.isDeleted
+          ) {
+            writeLocalActiveExamEnvelope(idbResult.envelope);
+            memoryActiveExams.set(setNumber, idbResult.envelope);
+            releaseSetQuarantine(setNumber);
+            return { success: true, envelope: idbResult.envelope };
+          } else {
+            return { success: false, error: 'IndexedDB read-back verification failed for new session' };
+          }
+        } else if (idbResult.error) {
+          return { success: false, error: idbResult.error };
+        }
+      } catch (err: any) {
+        // Fall through to localStorage
+      }
+    }
+
+    // 2. Fallback: localStorage
+    try {
+      const localExisting = readLocalActiveExamEnvelope(setNumber);
+      if (localExisting && !localExisting.isDeleted && localExisting.sessionId === cleanSessionId) {
+        memoryActiveExams.set(setNumber, localExisting);
+        releaseSetQuarantine(setNumber);
+        return { success: true, envelope: localExisting };
+      }
+
+      if (expectedPreviousSessionId !== undefined && localExisting) {
+        if (localExisting.sessionId !== expectedPreviousSessionId) {
+          return {
+            success: false,
+            error: `Cannot start new exam session: expected previous session ${expectedPreviousSessionId} but found ${localExisting.sessionId}`,
+          };
+        }
+      }
+
+      const nextRev = (localExisting?.revision || 0) + 1;
+      const envelope: VersionedActiveExamRecord = {
+        setNumber,
+        revision: nextRev,
+        updatedAt: Date.now(),
+        sessionId: cleanSessionId,
+        storageVersion: 1,
+        isDeleted: false,
+        state: stateSnapshot,
+      };
+
+      const localSuccess = writeLocalActiveExamEnvelope(envelope);
+      if (localSuccess) {
+        memoryActiveExams.set(setNumber, envelope);
+        releaseSetQuarantine(setNumber);
+        return { success: true, envelope };
+      }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'LocalStorage failed to persist new session' };
+    }
+
+    return { success: false, error: 'Failed to persist new active examination session' };
+  });
+}
+
+/**
  * Save active examination state with state snapshotting, in-transaction revision allocation,
- * verified persistence, and stale-session resurrection protection.
+ * verified persistence, and strict session isolation.
+ * Prevents Session A from overwriting an active Session B, and prevents resurrected cleared sessions.
  */
 export async function saveActiveExam(state: ActiveExamState): Promise<ActiveExamSaveResult> {
   // 1. Snapshot supplied state immediately to prevent caller mutations during persistence
@@ -923,16 +1224,28 @@ export async function saveActiveExam(state: ActiveExamState): Promise<ActiveExam
 
               getReq.onsuccess = () => {
                 const existing = parseEnvelopeOrMigrate(getReq.result);
+                const localEnv = readLocalActiveExamEnvelope(stateSnapshot.setNumber);
 
-                // Stale-session protection:
-                // If a tombstone exists for this exact sessionId, the session has been cleared/recovered
+                // Session-Isolation & Tombstone Checks:
                 if (existing && existing.isDeleted && existing.sessionId === sessionId) {
                   rejectReason = 'Exam session has been cleared and cannot be resurrected';
                   return;
                 }
+                if (localEnv && localEnv.isDeleted && localEnv.sessionId === sessionId) {
+                  rejectReason = 'Exam session has been cleared and cannot be resurrected';
+                  return;
+                }
 
-                // Check localStorage replica in case it has a higher revision
-                const localEnv = readLocalActiveExamEnvelope(stateSnapshot.setNumber);
+                // An active exam of a different session cannot be overwritten by this session!
+                if (existing && !existing.isDeleted && existing.sessionId !== sessionId) {
+                  rejectReason = 'Active examination belongs to another session and cannot be overwritten';
+                  return;
+                }
+                if (localEnv && !localEnv.isDeleted && localEnv.sessionId !== sessionId) {
+                  rejectReason = 'Active examination belongs to another session and cannot be overwritten';
+                  return;
+                }
+
                 let currentMaxRev = existing ? existing.revision : 0;
                 if (localEnv && localEnv.revision > currentMaxRev) {
                   currentMaxRev = localEnv.revision;
@@ -1001,8 +1314,13 @@ export async function saveActiveExam(state: ActiveExamState): Promise<ActiveExam
           } else {
             return { success: false, error: 'IndexedDB read-back verification failed' };
           }
-        } else if (idbResult.error && idbResult.error.includes('cannot be resurrected')) {
-          return { success: false, error: idbResult.error };
+        } else if (idbResult.error) {
+          if (
+            idbResult.error.includes('cannot be resurrected') ||
+            idbResult.error.includes('belongs to another session')
+          ) {
+            return { success: false, error: idbResult.error };
+          }
         }
       } catch {
         // Fall through to localStorage fallback
@@ -1014,6 +1332,9 @@ export async function saveActiveExam(state: ActiveExamState): Promise<ActiveExam
       const localExisting = readLocalActiveExamEnvelope(stateSnapshot.setNumber);
       if (localExisting && localExisting.isDeleted && localExisting.sessionId === sessionId) {
         return { success: false, error: 'Exam session has been cleared and cannot be resurrected' };
+      }
+      if (localExisting && !localExisting.isDeleted && localExisting.sessionId !== sessionId) {
+        return { success: false, error: 'Active examination belongs to another session and cannot be overwritten' };
       }
 
       const nextRev = (localExisting?.revision || 0) + 1;
@@ -1046,9 +1367,13 @@ export async function saveActiveExam(state: ActiveExamState): Promise<ActiveExam
 /**
  * Versioned deletion tombstone protocol for clearing active examinations.
  * Commits a higher-revision tombstone to prevent stale asynchronous writes or caches
- * from resurrecting a cleared exam.
+ * from resurrecting a cleared exam. Supports session-specific clearing to prevent
+ * an old session from clearing a newer retake.
  */
-export async function clearActiveExam(setNumber: number): Promise<ClearActiveExamResult> {
+export async function clearActiveExam(
+  setNumber: number,
+  expectedSessionId?: string
+): Promise<ClearActiveExamResult> {
   invalidateActiveExamCache(setNumber);
   if (typeof sessionStorage !== 'undefined') {
     try {
@@ -1077,19 +1402,37 @@ export async function clearActiveExam(setNumber: number): Promise<ClearActiveExa
                 const existing = parseEnvelopeOrMigrate(getReq.result);
                 const localEnv = readLocalActiveExamEnvelope(setNumber);
 
+                // Session validation if expectedSessionId is provided
+                if (expectedSessionId !== undefined) {
+                  if (existing && !existing.isDeleted && existing.sessionId !== expectedSessionId) {
+                    rejectReason = `Cannot clear active examination: session mismatch (expected ${expectedSessionId}, found ${existing.sessionId})`;
+                    return;
+                  }
+                  if (localEnv && !localEnv.isDeleted && localEnv.sessionId !== expectedSessionId) {
+                    rejectReason = `Cannot clear active examination: session mismatch (expected ${expectedSessionId}, found ${localEnv.sessionId})`;
+                    return;
+                  }
+                  // Idempotent success if already tombstoned for this exact session
+                  if (existing && existing.isDeleted && existing.sessionId === expectedSessionId) {
+                    tombstone = existing;
+                    return;
+                  }
+                }
+
                 let currentMaxRev = existing ? existing.revision : 0;
                 if (localEnv && localEnv.revision > currentMaxRev) {
                   currentMaxRev = localEnv.revision;
                 }
 
                 const nextRev = currentMaxRev + 1;
-                const sessionId = existing?.sessionId || localEnv?.sessionId || `sess_${setNumber}_tombstone_${Date.now()}`;
+                const tombstoneSessionId =
+                  expectedSessionId || existing?.sessionId || localEnv?.sessionId || `sess_${setNumber}_tombstone_${Date.now()}`;
 
                 tombstone = {
                   setNumber,
                   revision: nextRev,
                   updatedAt: Date.now(),
-                  sessionId,
+                  sessionId: tombstoneSessionId,
                   storageVersion: 1,
                   isDeleted: true,
                   state: undefined,
@@ -1143,6 +1486,10 @@ export async function clearActiveExam(setNumber: number): Promise<ClearActiveExa
           } else {
             return { success: false, error: 'IndexedDB tombstone read-back verification failed' };
           }
+        } else if (idbResult.error) {
+          if (idbResult.error.includes('session mismatch')) {
+            return { success: false, error: idbResult.error };
+          }
         }
       } catch {
         // Fall through to localStorage fallback
@@ -1152,8 +1499,22 @@ export async function clearActiveExam(setNumber: number): Promise<ClearActiveExa
     // 2. Fallback: localStorage deletion tombstone
     try {
       const localExisting = readLocalActiveExamEnvelope(setNumber);
+      if (expectedSessionId !== undefined) {
+        if (localExisting && !localExisting.isDeleted && localExisting.sessionId !== expectedSessionId) {
+          return {
+            success: false,
+            error: `Cannot clear active examination: session mismatch (expected ${expectedSessionId}, found ${localExisting.sessionId})`,
+          };
+        }
+        if (localExisting && localExisting.isDeleted && localExisting.sessionId === expectedSessionId) {
+          memoryActiveExams.set(setNumber, localExisting);
+          return { success: true, tombstone: localExisting };
+        }
+      }
+
       const nextRev = (localExisting?.revision || 0) + 1;
-      const sessionId = localExisting?.sessionId || `sess_${setNumber}_tombstone_${Date.now()}`;
+      const sessionId =
+        expectedSessionId || localExisting?.sessionId || `sess_${setNumber}_tombstone_${Date.now()}`;
 
       const tombstone: VersionedActiveExamRecord = {
         setNumber,
@@ -1182,45 +1543,75 @@ export async function clearActiveExam(setNumber: number): Promise<ClearActiveExa
 
 /**
  * Claims a recovery lease with owner ID and monotonically incremented fencing token.
+ * Truly monotonic: uses a dedicated fence_counters store whose high-water mark is never deleted on release.
  */
 export async function acquireIdbLeaseWithFencing(
   setNumber: number,
   ownerId: string,
   ttlMs = LEASE_TIMEOUT_MS
-): Promise<{ success: boolean; acquired: boolean; fencingToken?: number }> {
+): Promise<{ success: boolean; acquired: boolean; fencingToken?: number; ownerId?: string }> {
   try {
     const db = await openCoordinationDb();
     return new Promise((resolve) => {
       let isAcquired = false;
       let allocatedToken = 1;
-      const tx = db.transaction(IDB_STORE_LEASES, 'readwrite');
-      const store = tx.objectStore(IDB_STORE_LEASES);
-      const key = `set_${setNumber}`;
-      const getReq = store.get(key);
+      const tx = db.transaction([IDB_STORE_LEASES, IDB_STORE_FENCE_COUNTERS], 'readwrite');
+      const leaseStore = tx.objectStore(IDB_STORE_LEASES);
+      const counterStore = tx.objectStore(IDB_STORE_FENCE_COUNTERS);
+      const leaseKey = `set_${setNumber}`;
 
-      getReq.onsuccess = () => {
-        const existing = getReq.result;
-        const now = Date.now();
-        if (existing && existing.expiresAt > now && existing.ownerId !== ownerId) {
-          isAcquired = false;
-          return;
-        }
-        allocatedToken = ((existing && existing.fencingToken) || 0) + 1;
-        const putReq = store.put({ key, setNumber, ownerId, fencingToken: allocatedToken, expiresAt: now + ttlMs });
-        putReq.onsuccess = () => {
-          isAcquired = true;
+      const counterReq = counterStore.get(setNumber);
+      counterReq.onsuccess = () => {
+        const counterRecord = counterReq.result;
+        const previousHighWater =
+          counterRecord && Number.isInteger(counterRecord.lastToken) ? counterRecord.lastToken : 0;
+        allocatedToken = previousHighWater + 1;
+
+        const leaseReq = leaseStore.get(leaseKey);
+        leaseReq.onsuccess = () => {
+          const existingLease = leaseReq.result;
+          const now = Date.now();
+          if (existingLease && existingLease.expiresAt > now && existingLease.ownerId !== ownerId) {
+            // Unexpired lease owned by someone else
+            isAcquired = false;
+            return;
+          }
+
+          // Persist strictly monotonic token counter
+          counterStore.put({ setNumber, lastToken: allocatedToken });
+
+          // Put lease
+          const leaseRecord = {
+            key: leaseKey,
+            setNumber,
+            ownerId,
+            fencingToken: allocatedToken,
+            expiresAt: now + ttlMs,
+          };
+          const putReq = leaseStore.put(leaseRecord);
+          putReq.onsuccess = () => {
+            isAcquired = true;
+          };
+          putReq.onerror = () => {
+            isAcquired = false;
+          };
         };
-        putReq.onerror = () => {
+        leaseReq.onerror = () => {
           isAcquired = false;
         };
       };
-      getReq.onerror = () => {
+      counterReq.onerror = () => {
         isAcquired = false;
       };
 
       tx.oncomplete = () => {
         db.close();
-        resolve({ success: isAcquired, acquired: isAcquired, fencingToken: isAcquired ? allocatedToken : undefined });
+        resolve({
+          success: isAcquired,
+          acquired: isAcquired,
+          fencingToken: isAcquired ? allocatedToken : undefined,
+          ownerId: isAcquired ? ownerId : undefined,
+        });
       };
       tx.onerror = () => {
         db.close();
@@ -1309,7 +1700,8 @@ export async function renewIdbLease(
 }
 
 /**
- * Releases lease only if currently owned by the caller matching fencingToken.
+ * Releases lease only if currently owned by caller matching fencingToken.
+ * Note: Never deletes from fence_counters store so high-water marks persist forever.
  */
 export async function releaseIdbLease(
   setNumber: number,
@@ -1391,14 +1783,14 @@ export async function checkLeaseOwnership(
 }
 
 /**
- * Executes a recovery critical section inside an exclusive cross-tab lock with fencing tokens,
+ * Executes a recovery critical section inside an exclusive cross-tab lock with persistent fencing tokens,
  * owner-verified heartbeat renewal, and mandatory ownership assertions.
  */
 export async function withRecoveryLock<T>(
   setNumber: number,
   callback: (checkpoint: RecoveryCheckpoint) => Promise<T>
 ): Promise<{ acquired: true; result: T } | { acquired: false; error: 'recovery_in_progress' | 'lock_unavailable' }> {
-  // 1. PRIMARY MECHANISM: Web Locks API
+  // 1. PRIMARY MECHANISM: Web Locks API combined with persistent fencing token
   if (typeof navigator !== 'undefined' && navigator.locks && typeof navigator.locks.request === 'function') {
     try {
       const lockName = `${WEB_LOCK_PREFIX}${setNumber}`;
@@ -1415,13 +1807,45 @@ export async function withRecoveryLock<T>(
             return;
           }
           lockExecuted = true;
+          const ownerId = `weblocks_owner_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          let fencingToken = 1;
+
+          if (typeof indexedDB !== 'undefined') {
+            const leaseRes = await acquireIdbLeaseWithFencing(setNumber, ownerId, LEASE_TIMEOUT_MS);
+            if (leaseRes.acquired && leaseRes.fencingToken !== undefined) {
+              fencingToken = leaseRes.fencingToken;
+            }
+          }
+
+          let leaseLost = false;
           const checkpoint: RecoveryCheckpoint = {
-            ownerId: 'weblocks_owner',
-            fencingToken: 1,
-            isOwnerValid: async () => true,
-            assertOwnership: async () => {},
+            ownerId,
+            fencingToken,
+            isOwnerValid: async () => {
+              if (leaseLost) return false;
+              if (typeof indexedDB !== 'undefined') {
+                const valid = await checkLeaseOwnership(setNumber, ownerId, fencingToken);
+                if (!valid) leaseLost = true;
+                return valid;
+              }
+              return true;
+            },
+            assertOwnership: async () => {
+              const valid = await checkpoint.isOwnerValid();
+              if (!valid) {
+                leaseLost = true;
+                throw new Error('RECOVERY_OWNERSHIP_LOST');
+              }
+            },
           };
-          execResult = await callback(checkpoint);
+
+          try {
+            execResult = await callback(checkpoint);
+          } finally {
+            if (typeof indexedDB !== 'undefined') {
+              await releaseIdbLease(setNumber, ownerId, fencingToken);
+            }
+          }
         }
       );
 
@@ -1511,6 +1935,169 @@ export async function withRecoveryLock<T>(
 }
 
 /**
+ * Atomic Fenced Recovery Commit:
+ * Inside a single atomic IndexedDB readwrite transaction over ['leases', 'active_exams', 'recovered_attempts']:
+ * 1. Verifies caller holds active lease matching ownerId and fencingToken.
+ * 2. Checks attempt deduplication in recovered_attempts store.
+ * 3. Verifies active exam envelope belongs to the expected sessionId.
+ * 4. Commits deletion tombstone to active_exams and test attempt to recovered_attempts.
+ */
+export async function commitFencedRecovery(
+  params: CommitFencedRecoveryParams
+): Promise<CommitFencedRecoveryResult> {
+  const { setNumber, ownerId, fencingToken, sessionId, attempt } = params;
+
+  // 1. Verify attempt can be persisted to primary permanent attempts storage
+  const saveRes = saveAttempt(attempt);
+  if (!saveRes.success) {
+    return { success: false, error: saveRes.error || 'Failed to save attempt to storage' };
+  }
+
+  const rollbackAttempt = () => {
+    try {
+      const raw = localStorage.getItem(ATTEMPTS_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        const filtered = arr.filter((a: any) => a.attemptId !== attempt.attemptId);
+        localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(filtered));
+      }
+    } catch {
+      // Ignore
+    }
+  };
+
+  if (typeof indexedDB === 'undefined') {
+    // If IndexedDB is not supported, fallback to sequential localStorage commit with validation
+    const clearRes = await clearActiveExam(setNumber, sessionId);
+    if (!clearRes.success) {
+      rollbackAttempt();
+      return { success: false, error: clearRes.error || 'Failed to tombstone active exam in localStorage' };
+    }
+    return { success: true };
+  }
+
+  try {
+    const db = await openCoordinationDb();
+    return new Promise((resolve) => {
+      const tx = db.transaction(
+        [IDB_STORE_LEASES, IDB_STORE_ACTIVE_EXAMS, IDB_STORE_RECOVERED_ATTEMPTS],
+        'readwrite'
+      );
+      const leaseStore = tx.objectStore(IDB_STORE_LEASES);
+      const activeStore = tx.objectStore(IDB_STORE_ACTIVE_EXAMS);
+      const recoveredStore = tx.objectStore(IDB_STORE_RECOVERED_ATTEMPTS);
+
+      let commitError: string | null = null;
+      let committedTombstone: VersionedActiveExamRecord | null = null;
+
+      // 1. Verify lease ownership & fencing token inside transaction
+      const leaseKey = `set_${setNumber}`;
+      const leaseReq = leaseStore.get(leaseKey);
+
+      leaseReq.onsuccess = () => {
+        const lease = leaseReq.result;
+        const now = Date.now();
+        if (
+          !lease ||
+          lease.ownerId !== ownerId ||
+          lease.fencingToken !== fencingToken ||
+          lease.expiresAt <= now
+        ) {
+          commitError = 'RECOVERY_OWNERSHIP_LOST: Active lease ownership check failed';
+          return;
+        }
+
+        // 2. Check deduplication in recovered_attempts
+        const dedupReq = recoveredStore.get(attempt.attemptId);
+        dedupReq.onsuccess = () => {
+          if (dedupReq.result) {
+            commitError = `Attempt ${attempt.attemptId} has already been recovered`;
+            return;
+          }
+
+          // 3. Check active exam envelope
+          const activeReq = activeStore.get(setNumber);
+          activeReq.onsuccess = () => {
+            const existing = parseEnvelopeOrMigrate(activeReq.result);
+            if (existing) {
+              if (!existing.isDeleted && existing.sessionId !== sessionId) {
+                commitError = `Session mismatch: expected session ${sessionId} but found active session ${existing.sessionId}`;
+                return;
+              }
+              if (existing.isDeleted && existing.sessionId !== sessionId) {
+                commitError = `Session mismatch: expected session ${sessionId} but found tombstone session ${existing.sessionId}`;
+                return;
+              }
+            }
+
+            // 4. Allocate next revision for tombstone
+            const localEnv = readLocalActiveExamEnvelope(setNumber);
+            let currentMaxRev = existing ? existing.revision : 0;
+            if (localEnv && localEnv.revision > currentMaxRev) {
+              currentMaxRev = localEnv.revision;
+            }
+
+            const nextRev = currentMaxRev + 1;
+            committedTombstone = {
+              setNumber,
+              revision: nextRev,
+              updatedAt: Date.now(),
+              sessionId,
+              storageVersion: 1,
+              isDeleted: true,
+              state: undefined,
+            };
+
+            // 5. Commit tombstone to active_exams and attempt to recovered_attempts
+            activeStore.put(committedTombstone);
+            recoveredStore.put(attempt);
+          };
+          activeReq.onerror = () => {
+            commitError = activeReq.error?.message || 'Failed to inspect active_exams store';
+          };
+        };
+        dedupReq.onerror = () => {
+          commitError = dedupReq.error?.message || 'Failed to inspect recovered_attempts store';
+        };
+      };
+      leaseReq.onerror = () => {
+        commitError = leaseReq.error?.message || 'Failed to inspect leases store';
+      };
+
+      tx.oncomplete = () => {
+        db.close();
+        if (commitError || !committedTombstone) {
+          rollbackAttempt();
+          resolve({ success: false, error: commitError || 'Transaction completed without commit' });
+          return;
+        }
+
+        // Mirror tombstone to localStorage and memory cache
+        writeLocalActiveExamEnvelope(committedTombstone);
+        memoryActiveExams.set(setNumber, committedTombstone);
+
+        resolve({ success: true });
+      };
+
+      tx.onerror = () => {
+        db.close();
+        rollbackAttempt();
+        resolve({ success: false, error: tx.error?.message || 'commitFencedRecovery transaction failed' });
+      };
+
+      tx.onabort = () => {
+        db.close();
+        rollbackAttempt();
+        resolve({ success: false, error: commitError || 'commitFencedRecovery transaction aborted' });
+      };
+    });
+  } catch (err: any) {
+    rollbackAttempt();
+    return { success: false, error: err?.message || 'Failed to open coordination database' };
+  }
+}
+
+/**
  * Broadcast structured recovery message via BroadcastChannel and native storage event fallback.
  */
 export function notifyRecoveryComplete(setNumber: number, attemptId: string): void {
@@ -1540,7 +2127,7 @@ export function notifyRecoveryComplete(setNumber: number, attemptId: string): vo
 }
 
 /**
- * Reliable Asynchronous Expired Exam Recovery with Cross-Tab Coordination & Fencing Checkpoints.
+ * Reliable Asynchronous Expired Exam Recovery with Cross-Tab Coordination & Atomic Fenced Commits.
  */
 export async function checkAndRecoverExpiredExam(
   setNumber: number,
@@ -1572,11 +2159,12 @@ export async function checkAndRecoverExpiredExam(
   const totalDurationMs = settings.totalDurationMinutes * 60 * 1000;
   const examSessionStart = activeExam.examStartTime || (activeExam.examEndTime - totalDurationMs);
   const stableAttemptId = `att_${setNumber}_${examSessionStart}`;
+  const examSessionId = activeExam.sessionId || `sess_${setNumber}_${examSessionStart}`;
 
   const allAttempts = getAllAttempts();
   const existingAttempt = allAttempts.find((a) => a.attemptId === stableAttemptId);
   if (existingAttempt) {
-    await clearActiveExam(setNumber);
+    await clearActiveExam(setNumber, examSessionId);
     try {
       localStorage.setItem(
         `oir_recent_recovery_${setNumber}`,
@@ -1594,7 +2182,7 @@ export async function checkAndRecoverExpiredExam(
 
     const historyUnderLock = getAllAttempts().find((a) => a.attemptId === stableAttemptId);
     if (historyUnderLock) {
-      await clearActiveExam(setNumber);
+      await clearActiveExam(setNumber, examSessionId);
       return { status: 'already_recovered' as const, attempt: historyUnderLock };
     }
 
@@ -1611,38 +2199,24 @@ export async function checkAndRecoverExpiredExam(
     // Checkpoint 2: Immediately before persisting the attempt
     await checkpoint.assertOwnership();
 
-    const saveResult = saveAttempt(attempt);
-    if (!saveResult.success) {
+    // Atomic recovery commit: commits attempt + tombstone with lease & session check
+    const commitRes = await commitFencedRecovery({
+      setNumber,
+      ownerId: checkpoint.ownerId,
+      fencingToken: checkpoint.fencingToken,
+      sessionId: examSessionId,
+      attempt,
+    });
+
+    if (!commitRes.success) {
       return {
         status: 'storage_error' as const,
         setNumber,
-        message: saveResult.error || 'Failed to persist recovered examination',
+        message: commitRes.error || 'Failed to commit recovered examination',
       };
     }
 
-    const verifiedAttempts = getAllAttempts();
-    const isSaved = verifiedAttempts.some((a) => a.attemptId === stableAttemptId);
-    if (!isSaved) {
-      return {
-        status: 'storage_error' as const,
-        setNumber,
-        message: 'Persistence verification failed: recovered attempt not confirmed in storage',
-      };
-    }
-
-    // Checkpoint 3: Before clearing or tombstoning the active exam
-    await checkpoint.assertOwnership();
-
-    const clearResult = await clearActiveExam(setNumber);
-    if (!clearResult.success) {
-      return {
-        status: 'storage_error' as const,
-        setNumber,
-        message: clearResult.error || 'Failed to persist deletion tombstone',
-      };
-    }
-
-    // Checkpoint 4: Before marking recovery successful
+    // Checkpoint 3: After commit, before broadcasting and marking success
     await checkpoint.assertOwnership();
 
     try {
@@ -1654,9 +2228,6 @@ export async function checkAndRecoverExpiredExam(
       // Ignore
     }
 
-    // Checkpoint 5: Before broadcasting EXAM_RECOVERED
-    await checkpoint.assertOwnership();
-
     notifyRecoveryComplete(setNumber, stableAttemptId);
 
     return { status: 'recovered' as const, attempt };
@@ -1665,7 +2236,7 @@ export async function checkAndRecoverExpiredExam(
   if (!lockResult.acquired) {
     const recheck = getAllAttempts().find((a) => a.attemptId === stableAttemptId);
     if (recheck) {
-      await clearActiveExam(setNumber);
+      await clearActiveExam(setNumber, examSessionId);
       return { status: 'already_recovered', attempt: recheck };
     }
 
@@ -1685,15 +2256,42 @@ export async function checkAndRecoverExpiredExam(
   return lockResult.result;
 }
 
-export function clearAllUserData(): void {
+export async function clearAllUserData(): Promise<void> {
   localStorage.removeItem(ATTEMPTS_KEY);
   memoryActiveExams.clear();
   quarantinedSets.clear();
+  const clearPromises: Promise<any>[] = [];
   for (let s = 1; s <= 20; s++) {
-    clearActiveExam(s);
+    clearPromises.push(clearActiveExam(s));
     try {
       localStorage.removeItem(`oir_recent_recovery_${s}`);
       localStorage.removeItem(`oir_recovery_lock_${s}`);
+    } catch {
+      // Ignore
+    }
+  }
+  await Promise.all(clearPromises);
+
+  if (typeof indexedDB !== 'undefined') {
+    try {
+      const db = await openCoordinationDb();
+      await new Promise<void>((resolve) => {
+        const tx = db.transaction([IDB_STORE_RECOVERED_ATTEMPTS, IDB_STORE_LEASES], 'readwrite');
+        tx.objectStore(IDB_STORE_RECOVERED_ATTEMPTS).clear();
+        tx.objectStore(IDB_STORE_LEASES).clear();
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => {
+          db.close();
+          resolve();
+        };
+        tx.onabort = () => {
+          db.close();
+          resolve();
+        };
+      });
     } catch {
       // Ignore
     }

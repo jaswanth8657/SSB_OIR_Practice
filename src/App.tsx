@@ -29,6 +29,7 @@ import {
   getAllAttempts,
   clearAllUserData,
   clearActiveExam,
+  startActiveExamSession,
   checkAndRecoverExpiredExam,
   hydrateActiveExamCache,
   invalidateActiveExamCache,
@@ -82,7 +83,7 @@ export const App: React.FC = () => {
 
   // Defect 5: Listen for cross-tab recovery coordination via BroadcastChannel and storage events
   useEffect(() => {
-    const handleRecoverySync = (data: any) => {
+    const handleRecoverySync = async (data: any) => {
       if (
         !data ||
         data.type !== 'EXAM_RECOVERED' ||
@@ -105,12 +106,14 @@ export const App: React.FC = () => {
       // Invalidate and quarantine active exam cache for the recovered set
       quarantineSetForHydration(setNum);
 
-      // Asynchronously await authoritative hydration
-      getActiveExam(setNum).catch((err) => {
+      // Asynchronously await authoritative hydration before refreshing UI data
+      try {
+        await getActiveExam(setNum);
+      } catch (err) {
         console.warn(`Failed to hydrate active exam for recovered Set ${setNum}:`, err);
-      });
+      }
 
-      // Refresh user progress and dashboard statistics
+      // Refresh user progress and dashboard statistics AFTER authoritative hydration
       refreshUserData();
 
       // Clear any recovery error banner for that set
@@ -300,9 +303,46 @@ export const App: React.FC = () => {
 
   // Start exam from TestStartModal
   const handleStartExam = async () => {
-    // Clear any previous attempt state
-    await clearActiveExam(activeSetNumber);
-    setResumedExamState(null);
+    const totalDurationMs = settings.totalDurationMinutes * 60 * 1000;
+    const now = Date.now();
+    const newSessionId = `sess_${activeSetNumber}_${now}_${Math.random().toString(36).substring(2, 9)}`;
+    const questions = activeQuestions.length > 0 ? activeQuestions : getQuestionsForSet(activeSetNumber);
+    const initialMap: Record<number, any> = {};
+    const initialTimeLeft: Record<number, number> = {};
+    questions.forEach((q) => {
+      initialMap[q.questionNumber] = {
+        questionNumber: q.questionNumber,
+        selectedOption: undefined,
+        twoPartAnswer: undefined,
+        dropdownSelection: undefined,
+        isAnswered: false,
+      };
+      initialTimeLeft[q.questionNumber] = settings.questionTimeSeconds;
+    });
+
+    const initialExamState: ActiveExamState = {
+      setNumber: activeSetNumber,
+      currentQuestionIndex: 0,
+      userAnswers: initialMap,
+      examStartTime: now,
+      examEndTime: now + totalDurationMs,
+      questionTimeLeft: initialTimeLeft,
+      currentQuestionStartedAt: now,
+      questionExpiredMap: {},
+      sessionId: newSessionId,
+    };
+
+    const sessionRes = await startActiveExamSession(activeSetNumber, newSessionId, initialExamState);
+    if (!sessionRes.success) {
+      console.error('Failed to start new exam session:', sessionRes.error);
+      setRecoveryErrors((prev) => ({
+        ...prev,
+        [activeSetNumber]: sessionRes.error || 'Could not start exam session. Please try again.',
+      }));
+      return;
+    }
+
+    setResumedExamState(initialExamState);
     setCurrentView('exam');
   };
 
@@ -335,11 +375,49 @@ export const App: React.FC = () => {
 
   // Attempt Again
   const handleAttemptAgain = async (setNumber: number) => {
-    await clearActiveExam(setNumber);
-    setResumedExamState(null);
     setActiveSetNumber(setNumber);
     const questions = getQuestionsForSet(setNumber);
     setActiveQuestions(questions);
+
+    const totalDurationMs = settings.totalDurationMinutes * 60 * 1000;
+    const now = Date.now();
+    const newSessionId = `sess_${setNumber}_${now}_${Math.random().toString(36).substring(2, 9)}`;
+    const initialMap: Record<number, any> = {};
+    const initialTimeLeft: Record<number, number> = {};
+    questions.forEach((q) => {
+      initialMap[q.questionNumber] = {
+        questionNumber: q.questionNumber,
+        selectedOption: undefined,
+        twoPartAnswer: undefined,
+        dropdownSelection: undefined,
+        isAnswered: false,
+      };
+      initialTimeLeft[q.questionNumber] = settings.questionTimeSeconds;
+    });
+
+    const initialExamState: ActiveExamState = {
+      setNumber,
+      currentQuestionIndex: 0,
+      userAnswers: initialMap,
+      examStartTime: now,
+      examEndTime: now + totalDurationMs,
+      questionTimeLeft: initialTimeLeft,
+      currentQuestionStartedAt: now,
+      questionExpiredMap: {},
+      sessionId: newSessionId,
+    };
+
+    const sessionRes = await startActiveExamSession(setNumber, newSessionId, initialExamState);
+    if (!sessionRes.success) {
+      console.error('Failed to start new exam session for retake:', sessionRes.error);
+      setRecoveryErrors((prev) => ({
+        ...prev,
+        [setNumber]: sessionRes.error || 'Could not start exam session. Please try again.',
+      }));
+      return;
+    }
+
+    setResumedExamState(initialExamState);
     setCurrentView('exam');
   };
 
@@ -365,8 +443,8 @@ export const App: React.FC = () => {
   };
 
   // Reset all data
-  const handleConfirmReset = () => {
-    clearAllUserData();
+  const handleConfirmReset = async () => {
+    await clearAllUserData();
     refreshUserData();
     setIsResetConfirmOpen(false);
     setCurrentView('dashboard');

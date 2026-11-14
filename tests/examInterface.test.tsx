@@ -259,9 +259,9 @@ describe('ExamInterface Component Integration (src/components/ExamInterface.tsx)
   });
 
   // 9: Overall timeout submits the attempt
-  it('automatically submits when overall exam timer reaches 0', () => {
+  it('automatically submits when overall exam timer reaches 0', async () => {
     const onFinish = vi.fn();
-    act(() => {
+    await act(async () => {
       render(
         <ExamInterface
           setNumber={1}
@@ -273,9 +273,10 @@ describe('ExamInterface Component Integration (src/components/ExamInterface.tsx)
       );
     });
 
-    // Advance 25 minutes (1,500,000 ms)
-    act(() => {
+    // Advance 25 minutes (1,500,000 ms) and flush async promises
+    await act(async () => {
       vi.advanceTimersByTime(25 * 60 * 1000);
+      await Promise.resolve();
     });
 
     expect(onFinish).toHaveBeenCalledTimes(1);
@@ -285,9 +286,9 @@ describe('ExamInterface Component Integration (src/components/ExamInterface.tsx)
   });
 
   // 10: Manual submission saves the attempt
-  it('submits and triggers onFinish when user manually submits exam', () => {
+  it('submits and triggers onFinish when user manually submits exam', async () => {
     const onFinish = vi.fn();
-    act(() => {
+    await act(async () => {
       render(
         <ExamInterface
           setNumber={1}
@@ -301,14 +302,15 @@ describe('ExamInterface Component Integration (src/components/ExamInterface.tsx)
 
     // Open submit modal
     const submitBtn = screen.getByText('Submit Test');
-    act(() => {
+    await act(async () => {
       fireEvent.click(submitBtn);
     });
 
     // Confirm submission
     const confirmBtn = screen.getByText('Yes, Submit Now');
-    act(() => {
+    await act(async () => {
       fireEvent.click(confirmBtn);
+      await Promise.resolve();
     });
 
     expect(onFinish).toHaveBeenCalledTimes(1);

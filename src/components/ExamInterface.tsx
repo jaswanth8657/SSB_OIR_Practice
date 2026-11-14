@@ -151,7 +151,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
 
   // ----------------- SUBMISSION LOGIC (TASK 1) -----------------
   const submitExam = useCallback(
-    (reason: 'manual' | 'overall_timer_expired' = 'manual') => {
+    async (reason: 'manual' | 'overall_timer_expired' = 'manual') => {
       if (isSubmittingRef.current) return;
       isSubmittingRef.current = true;
       setIsSaving(true);
@@ -176,13 +176,7 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
       );
 
       const saveRes = saveAttempt(attempt);
-      if (saveRes.success) {
-        clearActiveExam(setNumber).catch((err) => {
-          console.warn('Failed to clear active exam after submission:', err);
-        });
-        setIsSaving(false);
-        onFinish(attempt);
-      } else {
+      if (!saveRes.success) {
         // Unlock submission ref so the candidate can retry saving
         isSubmittingRef.current = false;
         setIsSaving(false);
@@ -190,7 +184,24 @@ export const ExamInterface: React.FC<ExamInterfaceProps> = ({
         setSubmissionError(
           'Your examination could not be saved because browser storage is unavailable or full. Your answers have been preserved. Please retry saving your results.'
         );
+        return;
       }
+
+      // Authoritative session-specific deletion tombstone
+      const clearRes = await clearActiveExam(setNumber, sessionIdRef.current);
+      if (!clearRes.success) {
+        // Tombstone failed: do NOT navigate away! Unlock ref and display error
+        isSubmittingRef.current = false;
+        setIsSaving(false);
+        console.error('Failed to persist deletion tombstone after exam submission:', clearRes.error);
+        setSubmissionError(
+          'Your answers have been preserved, but finalizing the examination session failed. Please retry to complete submission.'
+        );
+        return;
+      }
+
+      setIsSaving(false);
+      onFinish(attempt);
     },
     [questions, userAnswers, setNumber, settings, overallRemaining, examEndTime, onFinish]
   );

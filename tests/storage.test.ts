@@ -33,6 +33,10 @@ import {
   withRecoveryLock,
   acquireIdbLeaseWithFencing,
   checkLeaseOwnership,
+  openCoordinationDb,
+  startActiveExamSession,
+  commitFencedRecovery,
+  readIdbActiveExamEnvelopeDetailed,
   DEFAULT_SETTINGS,
 } from '../src/utils/storage';
 import { Question, ActiveExamState, TestAttempt, VersionedActiveExamRecord } from '../src/types/oir';
@@ -41,7 +45,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
   // In-memory localStorage mock
   let store: Record<string, string> = {};
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = {};
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => store[key] || null,
@@ -55,6 +59,40 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
         store = {};
       },
     });
+
+    for (let s = 1; s <= 20; s++) {
+      invalidateActiveExamCache(s);
+    }
+
+    if (typeof indexedDB !== 'undefined') {
+      try {
+        const db = await openCoordinationDb();
+        await new Promise<void>((resolve) => {
+          const tx = db.transaction(
+            ['active_exams', 'leases', 'fence_counters', 'recovered_attempts'],
+            'readwrite'
+          );
+          tx.objectStore('active_exams').clear();
+          tx.objectStore('leases').clear();
+          tx.objectStore('fence_counters').clear();
+          tx.objectStore('recovered_attempts').clear();
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => {
+            db.close();
+            resolve();
+          };
+          tx.onabort = () => {
+            db.close();
+            resolve();
+          };
+        });
+      } catch {
+        // Ignore
+      }
+    }
   });
 
   afterEach(() => {
@@ -1352,11 +1390,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       });
 
       // Put revision 2 in IndexedDB
-      const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const req = indexedDB.open('oir_hub_coordination', 2);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
+      const db = await openCoordinationDb();
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction('active_exams', 'readwrite');
         const st = tx.objectStore('active_exams');
@@ -1364,6 +1398,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
           setNumber: 11,
           revision: 2,
           updatedAt: now - 500,
+          sessionId: 'sess_11_newer',
           state: newerState,
           storageVersion: 1,
         });
@@ -1419,11 +1454,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
       };
 
       // Put revision 1 in IndexedDB
-      const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const req = indexedDB.open('oir_hub_coordination', 2);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
+      const db = await openCoordinationDb();
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction('active_exams', 'readwrite');
         const st = tx.objectStore('active_exams');
@@ -1431,6 +1462,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
           setNumber: 13,
           revision: 1,
           updatedAt: now - 3000,
+          sessionId: 'sess_13_older',
           state: olderState,
           storageVersion: 1,
         });
@@ -1613,11 +1645,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
         });
 
         // Write revision 8 directly to IndexedDB
-        const db = await new Promise<IDBDatabase>((resolve, reject) => {
-          const req = indexedDB.open('oir_hub_coordination', 2);
-          req.onsuccess = () => resolve(req.result);
-          req.onerror = () => reject(req.error);
-        });
+        const db = await openCoordinationDb();
         await new Promise<void>((resolve, reject) => {
           const tx = db.transaction('active_exams', 'readwrite');
           const store = tx.objectStore('active_exams');
@@ -1901,11 +1929,7 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
           await checkpoint.assertOwnership(); // Checkpoint 1 passes
 
           // Force-expire the lease behind the scenes by having a new owner take it
-          const db = await new Promise<IDBDatabase>((res, rej) => {
-            const req = indexedDB.open('oir_hub_coordination', 2);
-            req.onsuccess = () => res(req.result);
-            req.onerror = () => rej(req.error);
-          });
+          const db = await openCoordinationDb();
           await new Promise<void>((res, rej) => {
             const tx = db.transaction('leases', 'readwrite');
             tx.objectStore('leases').put({
@@ -2214,6 +2238,287 @@ describe('Production Storage & Recovery Engine (src/utils/storage.ts)', () => {
 
         await getActiveExam(6);
         expect(getActiveExamSync(6)).not.toBeNull();
+      });
+    });
+
+    // ------------------------------------------------------------------------
+    // SECTION 8: Seventh-Pass Session Isolation & Atomic Recovery Commits
+    // ------------------------------------------------------------------------
+    describe('Seventh-Pass Session Isolation & Atomic Recovery Suite (Pass 7 Audit Requirements)', () => {
+      it('prevents Session A from overwriting active Session B', async () => {
+        const now = Date.now();
+        const sessionA = 'sess_user_tab_A';
+        const sessionB = 'sess_user_tab_B';
+
+        const stateA: ActiveExamState = {
+          setNumber: 8,
+          currentQuestionIndex: 2,
+          userAnswers: {},
+          examStartTime: now,
+          examEndTime: now + 20000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now,
+          questionExpiredMap: {},
+          sessionId: sessionA,
+        };
+
+        const stateB: ActiveExamState = {
+          ...stateA,
+          currentQuestionIndex: 10,
+          sessionId: sessionB,
+        };
+
+        // Tab A starts exam
+        const resA = await saveActiveExam(stateA);
+        expect(resA.success).toBe(true);
+
+        // Explicit new session starts (retake / new exam)
+        const startResB = await startActiveExamSession(8, sessionB, stateB);
+        expect(startResB.success).toBe(true);
+
+        // Tab A tries to save again with stale session A
+        const staleSaveA = await saveActiveExam({
+          ...stateA,
+          currentQuestionIndex: 5,
+        });
+        expect(staleSaveA.success).toBe(false);
+        expect(staleSaveA.error).toContain('belongs to another session');
+
+        // Current active exam is still Session B with currentQuestionIndex 10
+        const active = await getActiveExam(8);
+        expect(active?.sessionId).toBe(sessionB);
+        expect(active?.currentQuestionIndex).toBe(10);
+      });
+
+      it('prevents Session A from clearing active Session B', async () => {
+        const now = Date.now();
+        const sessionA = 'sess_clear_mismatch_A';
+        const sessionB = 'sess_clear_mismatch_B';
+
+        const stateA: ActiveExamState = {
+          setNumber: 9,
+          currentQuestionIndex: 1,
+          userAnswers: {},
+          examStartTime: now,
+          examEndTime: now + 20000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now,
+          questionExpiredMap: {},
+          sessionId: sessionA,
+        };
+
+        const stateB: ActiveExamState = {
+          ...stateA,
+          sessionId: sessionB,
+        };
+
+        await startActiveExamSession(9, sessionA, stateA);
+        await startActiveExamSession(9, sessionB, stateB);
+
+        // Tab A attempts to clear expecting session A
+        const clearRes = await clearActiveExam(9, sessionA);
+        expect(clearRes.success).toBe(false);
+        expect(clearRes.error).toContain('session mismatch');
+
+        // Session B remains active and untouched
+        const active = await getActiveExam(9);
+        expect(active?.sessionId).toBe(sessionB);
+      });
+
+      it('startActiveExamSession respects compare-and-set and supports idempotent start', async () => {
+        const now = Date.now();
+        const session1 = 'sess_cas_1';
+        const session2 = 'sess_cas_2';
+        const state1: ActiveExamState = {
+          setNumber: 10,
+          currentQuestionIndex: 0,
+          userAnswers: {},
+          examStartTime: now,
+          examEndTime: now + 30000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now,
+          questionExpiredMap: {},
+          sessionId: session1,
+        };
+        const state2: ActiveExamState = {
+          ...state1,
+          sessionId: session2,
+        };
+
+        // Start session 1
+        const start1 = await startActiveExamSession(10, session1, state1);
+        expect(start1.success).toBe(true);
+
+        // Repeated call with same sessionId is idempotent
+        const repeatStart1 = await startActiveExamSession(10, session1, state1);
+        expect(repeatStart1.success).toBe(true);
+
+        // Starting session 2 with wrong expectedPreviousSessionId fails
+        const failCas = await startActiveExamSession(10, session2, state2, 'wrong_session_id');
+        expect(failCas.success).toBe(false);
+        expect(failCas.error).toContain('expected previous session wrong_session_id');
+
+        // Starting session 2 with correct expectedPreviousSessionId succeeds
+        const succCas = await startActiveExamSession(10, session2, state2, session1);
+        expect(succCas.success).toBe(true);
+        expect(succCas.envelope?.sessionId).toBe(session2);
+      });
+
+      it('acquireIdbLeaseWithFencing allocates strictly monotonic fencing tokens across releases', async () => {
+        const setNumber = 11;
+        const owner1 = 'worker_tab_1';
+        const owner2 = 'worker_tab_2';
+
+        // 1. Acquire
+        const lease1 = await acquireIdbLeaseWithFencing(setNumber, owner1, 5000);
+        expect(lease1.acquired).toBe(true);
+        expect(lease1.fencingToken).toBe(1);
+
+        // 2. Release
+        await releaseIdbLease(setNumber, owner1, lease1.fencingToken);
+
+        // 3. Acquire again (must NOT reset to 1)
+        const lease2 = await acquireIdbLeaseWithFencing(setNumber, owner2, 5000);
+        expect(lease2.acquired).toBe(true);
+        expect(lease2.fencingToken).toBe(2);
+
+        // 4. Release and reacquire
+        await releaseIdbLease(setNumber, owner2, lease2.fencingToken);
+        const lease3 = await acquireIdbLeaseWithFencing(setNumber, owner1, 5000);
+        expect(lease3.acquired).toBe(true);
+        expect(lease3.fencingToken).toBe(3);
+
+        await releaseIdbLease(setNumber, owner1, lease3.fencingToken);
+      });
+
+      it('commitFencedRecovery atomically writes recovered attempt and tombstone verifying lease and session', async () => {
+        const now = Date.now();
+        const setNumber = 13;
+        const sessionId = 'sess_recovery_atomic_13';
+        const ownerId = 'recovery_worker_13';
+
+        const state: ActiveExamState = {
+          setNumber,
+          currentQuestionIndex: 20,
+          userAnswers: {},
+          examStartTime: now - 35 * 60 * 1000,
+          examEndTime: now - 5 * 60 * 1000,
+          questionTimeLeft: {},
+          currentQuestionStartedAt: now - 35 * 60 * 1000,
+          questionExpiredMap: {},
+          sessionId,
+        };
+
+        await startActiveExamSession(setNumber, sessionId, state);
+
+        const lease = await acquireIdbLeaseWithFencing(setNumber, ownerId, 10000);
+        expect(lease.acquired).toBe(true);
+
+        const attempt: TestAttempt = {
+          attemptId: `att_${setNumber}_${now}`,
+          setNumber,
+          timestamp: state.examEndTime,
+          totalQuestions: 50,
+          maxScore: 50,
+          score: 30,
+          correctAnswers: 30,
+          incorrectAnswers: 10,
+          unansweredQuestions: 10,
+          excludedQuestions: 0,
+          accuracyPercentage: 75,
+          timeTakenSeconds: 1800,
+          userAnswers: {},
+        };
+
+        // Commit with wrong session fails
+        const wrongSessionCommit = await commitFencedRecovery({
+          setNumber,
+          attempt,
+          sessionId: 'wrong_session',
+          ownerId,
+          fencingToken: lease.fencingToken!,
+        });
+        expect(wrongSessionCommit.success).toBe(false);
+        expect(wrongSessionCommit.error).toContain('mismatch');
+
+        // Commit with wrong fencing token fails
+        const wrongTokenCommit = await commitFencedRecovery({
+          setNumber,
+          attempt,
+          sessionId,
+          ownerId,
+          fencingToken: lease.fencingToken! + 99,
+        });
+        expect(wrongTokenCommit.success).toBe(false);
+
+        // Legitimate commit succeeds
+        const commitRes = await commitFencedRecovery({
+          setNumber,
+          attempt,
+          sessionId,
+          ownerId,
+          fencingToken: lease.fencingToken!,
+        });
+        expect(commitRes.success).toBe(true);
+
+        // Attempt is saved in attempt history
+        const attempts = getAllAttempts();
+        expect(attempts.some((a) => a.attemptId === attempt.attemptId)).toBe(true);
+
+        // Active exam is tombstoned
+        expect(await getActiveExam(setNumber)).toBeNull();
+      });
+
+      it('readIdbActiveExamEnvelopeDetailed detects errors and getActiveExam fails closed', async () => {
+        const setNumber = 14;
+
+        // Write a corrupt record directly into IndexedDB
+        const db = await openCoordinationDb();
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction('active_exams', 'readwrite');
+          const store = tx.objectStore('active_exams');
+          store.put({
+            setNumber,
+            revision: 'not_a_number', // malformed
+            storageVersion: 999,
+          });
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => {
+            db.close();
+            reject(tx.error);
+          };
+        });
+
+        // Seed stale localStorage record
+        writeLocalActiveExamEnvelope({
+          setNumber,
+          revision: 1,
+          updatedAt: Date.now(),
+          sessionId: 'sess_stale_local',
+          storageVersion: 1,
+          isDeleted: false,
+          state: {
+            setNumber,
+            currentQuestionIndex: 0,
+            userAnswers: {},
+            examStartTime: Date.now(),
+            examEndTime: Date.now() + 10000,
+            questionTimeLeft: {},
+            currentQuestionStartedAt: Date.now(),
+            questionExpiredMap: {},
+            sessionId: 'sess_stale_local',
+          },
+        });
+
+        const detailed = await readIdbActiveExamEnvelopeDetailed(setNumber);
+        expect(detailed.status).toBe('error');
+
+        // Authoritative getActiveExam must fail closed without returning stale localStorage
+        const active = await getActiveExam(setNumber);
+        expect(active).toBeNull();
       });
     });
   });

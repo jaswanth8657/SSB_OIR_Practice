@@ -118,6 +118,33 @@ export interface ClearActiveExamResult {
   tombstone?: VersionedActiveExamRecord;
 }
 
+export interface StartActiveExamSessionResult {
+  success: boolean;
+  error?: string;
+  envelope?: VersionedActiveExamRecord;
+}
+
+export type IdbEnvelopeReadStatus = 'found' | 'absent' | 'unsupported' | 'error';
+
+export interface IdbEnvelopeReadResult {
+  status: IdbEnvelopeReadStatus;
+  envelope?: VersionedActiveExamRecord;
+  error?: string;
+}
+
+export interface CommitFencedRecoveryParams {
+  setNumber: number;
+  ownerId: string;
+  fencingToken: number;
+  sessionId: string;
+  attempt: TestAttempt;
+}
+
+export interface CommitFencedRecoveryResult {
+  success: boolean;
+  error?: string;
+}
+
 export interface RecoveryCheckpoint {
   ownerId: string;
   fencingToken: number;

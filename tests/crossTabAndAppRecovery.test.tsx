@@ -162,6 +162,7 @@ describe('Cross-Tab Recovery & App Navigation Resilience (Defect 2 & Defect 5)',
 
       // Clear active exam on recovered set
       delete store['oir_active_exam_set_3'];
+      await clearActiveExam(3);
 
       // Send cross-tab recovery broadcast
       await act(async () => {
@@ -219,6 +220,7 @@ describe('Cross-Tab Recovery & App Navigation Resilience (Defect 2 & Defect 5)',
       store['oir_test_attempts_v1'] = JSON.stringify(storeHistory);
 
       delete store['oir_active_exam_set_4'];
+      await clearActiveExam(4);
 
       const storageEvent = new StorageEvent('storage', {
         key: 'oir_recovery_sync_event',
