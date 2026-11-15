@@ -17,23 +17,23 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   return (
     <header className="sticky top-0 z-40 w-full bg-white/95 backdrop-blur-md border-b border-slate-200 text-slate-800 shadow-sm">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 min-h-14 sm:h-16 flex items-center justify-between gap-2">
         {/* Brand */}
         <div
           onClick={onGoHome}
-          className="flex items-center gap-3 cursor-pointer group select-none"
+          className="flex min-w-0 items-center gap-2 sm:gap-3 cursor-pointer group select-none"
         >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 p-0.5 shadow-md shadow-blue-500/20 group-hover:shadow-blue-500/30 transition">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 p-0.5 shadow-md shadow-blue-500/20 group-hover:shadow-blue-500/30 transition">
             <div className="w-full h-full bg-blue-600 rounded-[10px] flex items-center justify-center">
               <Shield className="w-5 h-5 text-white group-hover:scale-110 transition-transform" />
             </div>
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-black text-lg tracking-wider text-slate-900 group-hover:text-blue-600 transition">
+              <span className="font-black text-sm sm:text-lg tracking-wide sm:tracking-wider whitespace-nowrap text-slate-900 group-hover:text-blue-600 transition">
                 OIR PREPARATION HUB
               </span>
-              <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-700 border border-blue-200 rounded-full">
+              <span className="hidden sm:inline-flex px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-700 border border-blue-200 rounded-full">
                 SSB Pro
               </span>
             </div>
@@ -44,7 +44,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Quick Stats & Actions */}
-        <div className="flex items-center gap-2 sm:gap-4">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-4">
           {/* Quick stats pill on medium+ screens */}
           <div className="hidden md:flex items-center gap-3 bg-slate-50 px-3.5 py-1.5 rounded-full border border-slate-200 text-xs font-semibold">
             <div className="flex items-center gap-1.5 text-slate-700">
@@ -65,7 +65,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Settings Button */}
           <button
             onClick={onOpenSettings}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 hover:border-blue-300 text-xs font-semibold transition cursor-pointer"
+            className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-2 min-h-11 rounded-xl bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 hover:border-blue-300 text-xs font-semibold transition cursor-pointer"
             title="Timer Settings"
           >
             <Clock className="w-4 h-4 text-blue-600" />
