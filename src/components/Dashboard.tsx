@@ -246,9 +246,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
             {/* Search */}
-            <div className="relative flex-1 sm:w-56">
+            <div className="relative w-full sm:w-56 sm:flex-none">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
@@ -260,10 +260,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             {/* Filter Tabs */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
+            <div className="grid grid-cols-3 w-full sm:w-auto sm:flex sm:items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
               <button
                 onClick={() => setFilterTab('all')}
-                className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                className={`min-w-0 min-h-11 px-2 sm:px-3 py-2 rounded-lg font-bold transition cursor-pointer ${
                   filterTab === 'all'
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
